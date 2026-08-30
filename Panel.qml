@@ -8,7 +8,7 @@ import Quickshell.Hyprland
 // Hover-triggered edge notch. Collapsed: a small pill hugging the top-right
 // corner. Hovering it expands a vertical stack of ring meters -- one per AI
 // agent usage record already written by omarchy.agents' collectors, plus
-// optional weather / cpu / memory rings.
+// optional weather / cpu / memory / download / upload rings.
 //
 // What renders is driven entirely by ~/.config/omarchy/plugins/notch/settings.toml
 // (a small hand-rolled TOML subset -- see applySettings below -- chosen to
@@ -22,6 +22,8 @@ import Quickshell.Hyprland
 //   weather = true       # condition emoji + temperature
 //   cpu = false           # current CPU load %
 //   memory = false        # current memory-used %
+//   download = false      # current download rate
+//   upload = false        # current upload rate
 //
 //   size = "medium"   # small | medium | large -- open pill only, the
 //                     # collapsed idle strip is a fixed size regardless
@@ -32,9 +34,9 @@ import Quickshell.Hyprland
 // missing lines don't. A ring with no matching data (an agent id with no
 // usage record yet) is silently skipped rather than erroring. A missing
 // file, or one with no [items] section, falls back to every known agent
-// plus weather/cpu/memory so the notch still does something useful out of
-// the box. Edits hot-reload -- no restart needed to see a settings.toml
-// change.
+// plus weather/cpu/memory/download/upload so the notch still does
+// something useful out of the box. Edits hot-reload -- no restart needed
+// to see a settings.toml change.
 Item {
   id: root
   visible: false
@@ -134,11 +136,12 @@ Item {
 
   // ------------------------------------------------------------ settings
 
-  // Every currently-known agent plus weather, cpu, and memory -- used only
-  // when settings.toml is missing or has no [items] section, so the notch
-  // still does something useful before it's been configured.
+  // Every currently-known agent plus weather, cpu, memory, download, and
+  // upload -- used only when settings.toml is missing or has no [items]
+  // section, so the notch still does something useful before it's been
+  // configured.
   function defaultItems() {
-    return root.agentIds.concat(["weather", "cpu", "memory"])
+    return root.agentIds.concat(["weather", "cpu", "memory", "download", "upload"])
   }
 
   property var configuredItems: defaultItems()
@@ -353,12 +356,76 @@ Item {
     onTriggered: root.refreshResources()
   }
 
+  // ------------------------------------------------------------- network
+
+  readonly property string downloadColor: "#42a5f5"
+  readonly property string uploadColor: "#ec407a"
+
+  property real networkRxRate: 0
+  property real networkTxRate: 0
+  property bool networkReady: false
+
+  readonly property bool networkWanted: root.configuredItems.indexOf("download") !== -1 || root.configuredItems.indexOf("upload") !== -1
+
+  // Rates, not percents, so these have no fill -- same static-outline
+  // treatment as weather. Center gets an arrow instead of a brand icon,
+  // reusing the "resource" type's short-label rendering (see Panel below).
+  function formatRate(bytesPerSec) {
+    if (bytesPerSec < 1024) return Math.round(bytesPerSec) + "B/s"
+    if (bytesPerSec < 1024 * 1024) return (bytesPerSec / 1024).toFixed(1) + "K/s"
+    return (bytesPerSec / (1024 * 1024)).toFixed(1) + "M/s"
+  }
+
+  function networkEntry(id, arrow, rate, color) {
+    return {
+      type: "network",
+      id: id,
+      label: arrow,
+      value: root.networkReady ? root.formatRate(rate) : "--",
+      known: root.networkReady,
+      color: color
+    }
+  }
+
+  function downloadEntry() { return root.networkEntry("download", "↓", root.networkRxRate, root.downloadColor) }
+  function uploadEntry() { return root.networkEntry("upload", "↑", root.networkTxRate, root.uploadColor) }
+
+  // 0.5s /proc/net/dev sample window lives in the script, not here, so
+  // this stays a normal async Process instead of blocking the shell.
+  Process {
+    id: networkProcess
+    command: [root.pluginDir + "/bin/notch-network-stats"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var parts = String(text || "").trim().split(/\s+/)
+        if (parts.length === 2) {
+          root.networkRxRate = parseFloat(parts[0]) || 0
+          root.networkTxRate = parseFloat(parts[1]) || 0
+          root.networkReady = true
+        }
+      }
+    }
+  }
+
+  function refreshNetwork() {
+    if (!networkProcess.running) networkProcess.running = true
+  }
+
+  Timer {
+    interval: 3000
+    running: root.networkWanted
+    repeat: true
+    triggeredOnStart: true
+    onTriggered: root.refreshNetwork()
+  }
+
   // ------------------------------------------------------- combined model
 
   // Walks configuredItems in order, resolving each entry ("weather", "cpu",
-  // "memory", or a specific agent id) to at most one ring. Anything
-  // unrecognized, or an agent id with no usage record yet, is skipped
-  // rather than erroring.
+  // "memory", "download", "upload", or a specific agent id) to at most one
+  // ring. Anything unrecognized, or an agent id with no usage record yet,
+  // is skipped rather than erroring.
   function itemsModel() {
     var out = []
     for (var i = 0; i < root.configuredItems.length; i++) {
@@ -369,6 +436,10 @@ Item {
         out.push(root.cpuEntry())
       } else if (key === "memory") {
         out.push(root.memoryEntry())
+      } else if (key === "download") {
+        out.push(root.downloadEntry())
+      } else if (key === "upload") {
+        out.push(root.uploadEntry())
       } else {
         var single = root.agentEntry(key)
         if (single) out.push(single)
@@ -565,10 +636,22 @@ Item {
                 font.pixelSize: root.ringSize * 0.24
                 font.bold: true
               }
+              // download/upload: a single arrow, sized more like the
+              // weather emoji than the 3-letter resource labels.
+              Text {
+                visible: modelData.type === "network"
+                anchors.centerIn: parent
+                text: modelData.type === "network" ? modelData.label : ""
+                color: modelData.type === "network" ? modelData.color : "#e6e6e6"
+                font.pixelSize: root.ringSize * 0.4
+                font.bold: true
+              }
             }
             Text {
               anchors.horizontalCenter: parent.horizontalCenter
-              text: modelData.type === "weather" ? modelData.temp : (modelData.known ? Math.round(modelData.percent * 100) + "%" : "--")
+              text: modelData.type === "weather" ? modelData.temp
+                : modelData.type === "network" ? modelData.value
+                : (modelData.known ? Math.round(modelData.percent * 100) + "%" : "--")
               color: "#e6e6e6"
               font.pixelSize: root.size.percentFont
             }

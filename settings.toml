@@ -8,9 +8,11 @@ size = "small"
 # true = show, false = hide. Any other agent id omarchy.agents writes a
 # usage record for also works -- just add a line with that id.
 [items]
-claude = true         # Claude usage %, if omarchy.agents has a record for it
-codex = false          # Codex usage %, if omarchy.agents has a record for it
-fireworks = false      # Fireworks usage %, if omarchy.agents has a record for it
-weather = true          # condition emoji + temperature (location from the weather bar widget, or IP auto-detect)
-cpu = true             # current CPU load %
-memory = true          # current memory-used %
+claude = true
+codex = false
+fireworks = false
+cpu = true
+memory = true
+weather = true
+download = false
+upload = false

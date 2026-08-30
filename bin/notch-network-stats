@@ -1,0 +1,25 @@
+#!/bin/bash
+# Prints "<rx_bytes_per_sec> <tx_bytes_per_sec>" using a short /proc/net/dev
+# sample window. Sums every interface except loopback, so it reflects total
+# traffic rather than a single NIC -- fine for a desktop notch, not meant to
+# be per-interface accounting.
+
+read_totals() {
+  awk '
+    NR > 2 {
+      iface = $1
+      sub(":", "", iface)
+      if (iface != "lo") {
+        rx += $2
+        tx += $10
+      }
+    }
+    END { print rx, tx }
+  ' /proc/net/dev
+}
+
+read -r rx1 tx1 < <(read_totals)
+sleep 0.5
+read -r rx2 tx2 < <(read_totals)
+
+echo "$(( (rx2 - rx1) * 2 )) $(( (tx2 - tx1) * 2 ))"
