@@ -9,7 +9,6 @@ download/upload), each with detail card on hover. Auto-hides on fullscreen.
 ```bash
 git clone git@github.com:dbohry/omanotch.git ~/.config/omarchy/plugins/notch
 omarchy plugin enable notch
-omarchy restart shell
 ```
 
 ## Uninstall
@@ -17,7 +16,6 @@ omarchy restart shell
 ```bash
 omarchy plugin disable notch
 rm -rf ~/.config/omarchy/plugins/notch
-omarchy restart shell
 ```
 
 ## Configuration
