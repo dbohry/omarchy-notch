@@ -7,7 +7,7 @@ download/upload), each with detail card on hover. Auto-hides on fullscreen.
 ## Install
 
 ```bash
-git clone git@github.com:dbohry/omanotch.git ~/.config/omarchy/plugins/notch
+git clone https://github.com/dbohry/omarchy-notch.git ~/.config/omarchy/plugins/notch
 omarchy plugin enable notch
 ```
 
