@@ -1,7 +1,11 @@
 #!/bin/bash
-# Prints "<cpu_pct> <mem_pct>" using a short /proc/stat sample window.
-# Self-contained (no dependency on the separate sysmon plugin) so the notch
-# still works if that plugin is ever disabled or removed.
+# Prints "<cpu_pct> <mem_pct> <load1> <load5> <load15> <freq_mhz>" using a
+# short /proc/stat sample window for cpu_pct. Everything else is a single
+# read of a file the kernel already maintains -- no lm-sensors or other
+# extra package, which is why there's no temperature here: that needs a
+# sensor that isn't guaranteed to exist or to be the CPU package on every
+# machine. Self-contained (no dependency on the separate sysmon plugin) so
+# the notch still works if that plugin is ever disabled or removed.
 
 read -r _ u1 n1 s1 i1 w1 irq1 sirq1 st1 _ < /proc/stat
 sleep 0.3
@@ -26,4 +30,18 @@ if (( mem_total > 0 )); then
   mem=$(( (100 * (mem_total - mem_avail)) / mem_total ))
 fi
 
-echo "$cpu $mem"
+read -r load1 load5 load15 _ < /proc/loadavg
+
+freq_khz=""
+if [[ -r /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq ]]; then
+  freq_khz=$(< /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq)
+fi
+if [[ -n "$freq_khz" ]]; then
+  freq_mhz=$(( freq_khz / 1000 ))
+else
+  # Some VMs/kernels have no cpufreq sysfs at all; /proc/cpuinfo's
+  # "cpu MHz" is the fallback, less precise but always present.
+  freq_mhz=$(awk '/^cpu MHz/{print int($4); exit}' /proc/cpuinfo)
+fi
+
+echo "$cpu $mem $load1 $load5 $load15 ${freq_mhz:-0}"
