@@ -53,5 +53,4 @@ upload = false
 - Network access to wttr.in + open-meteo.com (only if `weather` enabled)
 
 ## License
-
-MIT
+[MIT](LICENSE)
