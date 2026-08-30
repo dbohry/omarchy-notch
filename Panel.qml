@@ -6,8 +6,27 @@ import Quickshell.Wayland
 import Quickshell.Hyprland
 
 // Hover-triggered edge notch. Collapsed: a small pill hugging the top-right
-// corner. Hovering it expands a vertical stack of ring meters, one per AI
-// agent usage record already written by omarchy.agents' collectors.
+// corner. Hovering it expands a vertical stack of ring meters -- one per AI
+// agent usage record already written by omarchy.agents' collectors, plus an
+// optional weather ring.
+//
+// What renders is driven entirely by ~/.config/omarchy/plugins/notch/settings.json:
+//
+//   { "items": ["claude", "codex", "fireworks", "weather"], "size": "medium" }
+//
+// "items" is an ordered list (render order = list order), one ring each:
+//   - an agent id ("claude" / "codex" / "fireworks" / ...) -- whatever
+//     omarchy.agents has written a usage record for
+//   - "weather"   the weather ring
+//
+// An entry with no matching data (an agent id with no usage record yet, or
+// an unrecognized string) is silently skipped rather than erroring. Missing
+// or unparseable settings.json falls back to every known agent plus weather
+// so the notch still does something useful out of the box. Edits hot-reload
+// -- no restart needed to see a settings.json change.
+//
+// "size" is "small" | "medium" | "large" (default "medium" if omitted or
+// unrecognized) -- scales ring size, spacing, and the collapsed pill.
 Item {
   id: root
   visible: false
@@ -17,6 +36,7 @@ Item {
   readonly property string home: Quickshell.env("HOME") || ""
   readonly property string usageDir: (Quickshell.env("XDG_STATE_HOME") || home + "/.local/state") + "/omarchy/agents/usage"
   readonly property string assetsDir: "/usr/share/omarchy/shell/plugins/agents/assets"
+  readonly property string pluginDir: (Quickshell.env("XDG_CONFIG_HOME") || home + "/.config") + "/omarchy/plugins/notch"
 
   property bool expanded: false
 
@@ -66,40 +86,195 @@ Item {
       Hyprland.refreshWorkspaces()
     }
   }
+
   property var agentIds: []
   property var records: ({})
 
-  readonly property int collapsedW: 10
-  readonly property int collapsedH: 90
-  readonly property int expandedW: 84
-  readonly property int ringSize: 60
-  readonly property int rowGap: 14
+  // "medium" is the size this plugin shipped with -- the numbers below are
+  // exactly its old fixed values. "small"/"large" scale everything ring-
+  // related by roughly -25%/+30%; position (topMargin/rightMargin) and the
+  // collapsed hover strip stay close to constant since those aren't really
+  // a "size" the user is choosing, just the edge trigger.
+  readonly property var sizePresets: ({
+    small:  { ringSize: 38, ringStroke: 3, rowGap: 10, padTop: 10, padBottom: 9,  collapsedW: 8,  collapsedH: 70,  percentFont: 9 },
+    medium: { ringSize: 50, ringStroke: 4, rowGap: 14, padTop: 14, padBottom: 12, collapsedW: 10, collapsedH: 90,  percentFont: 11 },
+    large:  { ringSize: 64, ringStroke: 5, rowGap: 18, padTop: 18, padBottom: 16, collapsedW: 12, collapsedH: 110, percentFont: 13 }
+  })
+  property string sizeKey: "medium"
+  readonly property var size: sizePresets[sizeKey] || sizePresets.medium
+
+  readonly property int collapsedW: size.collapsedW
+  readonly property int collapsedH: size.collapsedH
+  readonly property int ringSize: size.ringSize
+  readonly property int ringStroke: size.ringStroke
+  readonly property int rowGap: size.rowGap
+  readonly property int pillPadTop: size.padTop
+  readonly property int pillPadBottom: size.padBottom
+  readonly property int expandedW: ringSize + 26
   readonly property int topMargin: 46
   readonly property int rightMargin: 10
 
   readonly property var iconFor: ({ "claude": "claude.svg", "codex": "codex.svg", "fireworks": "fireworks.svg" })
   readonly property var colorFor: ({ "claude": "#e8622c", "codex": "#3ecf6e", "fireworks": "#e0c93e" })
 
-  function agentModel() {
-    var out = []
-    for (var i = 0; i < agentIds.length; i++) {
-      var id = agentIds[i]
-      var rec = records[id]
-      if (!rec) continue
-      var percent = 0
-      var known = false
-      if (Array.isArray(rec.limits) && rec.limits.length > 0) {
-        percent = Math.max(0, Math.min(1, rec.limits[0].percent || 0))
-        known = true
+  // ------------------------------------------------------------ settings
+
+  // Every currently-known agent plus weather -- used only when
+  // settings.json is missing or unparseable, so the notch still does
+  // something useful before it's been configured.
+  function defaultItems() {
+    return root.agentIds.concat(["weather"])
+  }
+
+  property var configuredItems: defaultItems()
+
+  FileView {
+    id: settingsFile
+    path: root.pluginDir + "/settings.json"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: root.applySettings(text())
+    onLoadFailed: root.configuredItems = root.defaultItems()
+  }
+
+  function applySettings(content) {
+    try {
+      var parsed = JSON.parse(String(content || "{}"))
+      root.configuredItems = Array.isArray(parsed.items) ? parsed.items : root.defaultItems()
+      root.sizeKey = root.sizePresets.hasOwnProperty(parsed.size) ? parsed.size : "medium"
+    } catch (e) {
+      console.warn("notch", "bad settings.json, using defaults", e)
+      root.configuredItems = root.defaultItems()
+      root.sizeKey = "medium"
+    }
+  }
+
+  // ------------------------------------------------------------ agents
+
+  function agentEntry(id) {
+    var rec = root.records[id]
+    if (!rec) return null
+    var percent = 0
+    var known = false
+    if (Array.isArray(rec.limits) && rec.limits.length > 0) {
+      percent = Math.max(0, Math.min(1, rec.limits[0].percent || 0))
+      known = true
+    }
+    return {
+      type: "agent",
+      id: id,
+      name: rec.name || id,
+      percent: percent,
+      known: known,
+      icon: assetsDir + "/" + (iconFor[id] || (id + ".svg")),
+      color: colorFor[id] || "#8a8a8a"
+    }
+  }
+
+  // ----------------------------------------------------------- weather
+
+  property real weatherTempC: NaN
+  property string weatherCode: ""
+  property bool weatherReady: false
+  property string weatherLocationQuery: ""
+
+  readonly property bool weatherKnown: root.weatherReady && !isNaN(root.weatherTempC)
+  readonly property bool weatherWanted: root.configuredItems.indexOf("weather") !== -1
+
+  function weatherEmoji(code) {
+    var c = parseInt(String(code || "0"), 10)
+    if (c === 113) return "☀"           // clear
+    if (c === 116) return "⛅"           // partly cloudy
+    if (c === 119 || c === 122) return "☁" // cloudy/overcast
+    if (c === 143 || c === 248 || c === 260) return "🌫" // fog
+    if ([200, 386, 389, 392, 395].indexOf(c) !== -1) return "⛈" // thunder
+    if ([182, 185, 281, 284, 311, 314, 317, 320, 329, 332, 335, 338, 350, 362, 365, 371, 374, 377].indexOf(c) !== -1) return "❄" // snow
+    if ([176, 179, 227, 230, 263, 266, 293, 296, 299, 302, 305, 308, 323, 326, 353, 356, 359, 368].indexOf(c) !== -1) return "🌧" // rain
+    return "⛅"
+  }
+
+  function weatherEntry() {
+    return {
+      type: "weather",
+      id: "weather",
+      percent: 0,
+      known: root.weatherKnown,
+      temp: root.weatherKnown ? Math.round(root.weatherTempC) + "°" : "--",
+      emoji: root.weatherKnown ? weatherEmoji(root.weatherCode) : "⛅",
+      color: "#5db8e8"
+    }
+  }
+
+  // Reuses the location the built-in weather bar widget already has
+  // configured (same file it writes to) so there's no separate location
+  // picker to build here -- if it's unset this queries wttr.in with no
+  // location, which auto-detects by IP the same way that widget falls back.
+  FileView {
+    id: weatherLocationFile
+    path: home + "/.local/state/omarchy/settings/weather.json"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: root.applyWeatherLocation(text())
+    onLoadFailed: root.weatherLocationQuery = ""
+  }
+
+  function applyWeatherLocation(content) {
+    try {
+      var parsed = JSON.parse(String(content || "{}"))
+      root.weatherLocationQuery = (parsed && typeof parsed.name === "string") ? parsed.name : ""
+    } catch (e) {
+      root.weatherLocationQuery = ""
+    }
+  }
+
+  Process {
+    id: weatherProcess
+    command: ["curl", "-fsS", "--max-time", "5", "https://wttr.in/" + encodeURIComponent(root.weatherLocationQuery) + "?format=j1"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        try {
+          var report = JSON.parse(String(text || ""))
+          var current = report.current_condition[0]
+          root.weatherTempC = parseFloat(current.temp_C)
+          root.weatherCode = current.weatherCode
+          root.weatherReady = true
+        } catch (e) {
+          root.weatherReady = false
+        }
       }
-      out.push({
-        id: id,
-        name: rec.name || id,
-        percent: percent,
-        known: known,
-        icon: assetsDir + "/" + (iconFor[id] || (id + ".svg")),
-        color: colorFor[id] || "#8a8a8a"
-      })
+    }
+  }
+
+  function refreshWeather() {
+    if (!weatherProcess.running) weatherProcess.running = true
+  }
+
+  Timer {
+    interval: 900000
+    running: root.weatherWanted
+    repeat: true
+    triggeredOnStart: true
+    onTriggered: root.refreshWeather()
+  }
+
+  // ------------------------------------------------------- combined model
+
+  // Walks configuredItems in order, resolving each entry (a specific agent
+  // id, or "weather") to at most one ring. Anything unrecognized, or an
+  // agent id with no usage record yet, is skipped rather than erroring.
+  function itemsModel() {
+    var out = []
+    for (var i = 0; i < root.configuredItems.length; i++) {
+      var key = root.configuredItems[i]
+      if (key === "weather") {
+        out.push(root.weatherEntry())
+      } else {
+        var single = root.agentEntry(key)
+        if (single) out.push(single)
+      }
     }
     return out
   }
@@ -173,7 +348,7 @@ Item {
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
     exclusionMode: ExclusionMode.Ignore
 
-    // Only the notch/pill rectangle accepts pointer input; everything else
+    // Only the pill's bounding box accepts pointer input; everything else
     // in this full-height transparent window passes clicks through.
     mask: Region {
       item: pill
@@ -191,7 +366,7 @@ Item {
       // Collapse to zero size (not just hidden) while a window is fullscreen
       // so the layer-shell mask leaves no hoverable/clickable region there.
       width: root.fullscreenActive ? 0 : (root.expanded ? root.expandedW : root.collapsedW)
-      height: root.fullscreenActive ? 0 : (root.expanded ? (root.rowGap + (root.ringSize + root.rowGap) * agentColumn.count + 56) : root.collapsedH)
+      height: root.fullscreenActive ? 0 : (root.expanded ? (agentColumn.implicitHeight + root.pillPadTop + root.pillPadBottom) : root.collapsedH)
 
       Behavior on width { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
       Behavior on height { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
@@ -208,89 +383,81 @@ Item {
         Behavior on opacity { NumberAnimation { duration: 120 } }
         anchors.top: parent.top
         anchors.horizontalCenter: parent.horizontalCenter
-        anchors.topMargin: root.rowGap
+        anchors.topMargin: root.pillPadTop
         spacing: root.rowGap
-        property int count: repeater.count
 
         Repeater {
-          id: repeater
-          model: root.agentModel()
+          model: root.itemsModel()
 
           Column {
-            spacing: 4
+            spacing: 6
             Item {
               width: root.ringSize
               height: root.ringSize
               anchors.horizontalCenter: parent.horizontalCenter
 
               Shape {
-                id: track
                 anchors.fill: parent
                 ShapePath {
-                  strokeWidth: 4
+                  strokeWidth: root.ringStroke
                   strokeColor: "#333333"
                   fillColor: "transparent"
                   capStyle: ShapePath.RoundCap
                   PathAngleArc {
                     centerX: root.ringSize / 2
                     centerY: root.ringSize / 2
-                    radiusX: root.ringSize / 2 - 3
-                    radiusY: root.ringSize / 2 - 3
+                    radiusX: root.ringSize / 2 - root.ringStroke
+                    radiusY: root.ringSize / 2 - root.ringStroke
                     startAngle: -90
                     sweepAngle: 360
                   }
                 }
               }
               Shape {
+                visible: modelData.type === "agent"
                 anchors.fill: parent
                 ShapePath {
-                  strokeWidth: 4
+                  strokeWidth: root.ringStroke
                   strokeColor: modelData.color
                   fillColor: "transparent"
                   capStyle: ShapePath.RoundCap
                   PathAngleArc {
                     centerX: root.ringSize / 2
                     centerY: root.ringSize / 2
-                    radiusX: root.ringSize / 2 - 3
-                    radiusY: root.ringSize / 2 - 3
+                    radiusX: root.ringSize / 2 - root.ringStroke
+                    radiusY: root.ringSize / 2 - root.ringStroke
                     startAngle: -90
                     sweepAngle: modelData.known ? 360 * modelData.percent : 0
                   }
                 }
               }
+              // Same layout for both: an icon centered in the ring, a value
+              // below it. Agents get their brand mark and a percent; weather
+              // gets a condition emoji and the temperature. Weather's ring
+              // stays a static outline since it has no meaningful percent.
               Image {
-                source: "file://" + modelData.icon
-                width: root.ringSize * 0.4
+                visible: modelData.type === "agent"
+                source: modelData.type === "agent" ? ("file://" + modelData.icon) : ""
+                width: root.ringSize * 0.42
                 height: width
                 anchors.centerIn: parent
                 fillMode: Image.PreserveAspectFit
               }
+              // Weather has no svg mark, so its "icon" is the condition
+              // emoji, sized to roughly match the agent icons' footprint.
+              Text {
+                visible: modelData.type === "weather"
+                anchors.centerIn: parent
+                text: modelData.type === "weather" ? modelData.emoji : ""
+                font.pixelSize: root.ringSize * 0.42
+              }
             }
             Text {
               anchors.horizontalCenter: parent.horizontalCenter
-              text: modelData.known ? Math.round(modelData.percent * 100) + "%" : "--"
+              text: modelData.type === "weather" ? modelData.temp : (modelData.known ? Math.round(modelData.percent * 100) + "%" : "--")
               color: "#e6e6e6"
-              font.pixelSize: 11
+              font.pixelSize: root.size.percentFont
             }
-          }
-        }
-
-        Rectangle {
-          visible: root.expanded
-          width: 28
-          height: 28
-          radius: 14
-          color: "#222222"
-          anchors.horizontalCenter: parent.horizontalCenter
-          Text {
-            anchors.centerIn: parent
-            text: "⚙"
-            color: "#cccccc"
-            font.pixelSize: 14
-          }
-          MouseArea {
-            anchors.fill: parent
-            onClicked: Quickshell.execDetached(["omarchy-shell", "omarchy.agents", "open"])
           }
         }
       }
