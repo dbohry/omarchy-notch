@@ -114,7 +114,7 @@ Item {
   property string sizeKey: "medium"
   readonly property var size: sizePresets[sizeKey] || sizePresets.medium
 
-  readonly property int collapsedW: 18
+  readonly property int collapsedW: 8
   readonly property int collapsedH: 70
   readonly property int ringSize: size.ringSize
   readonly property int ringStroke: size.ringStroke
@@ -861,10 +861,8 @@ Item {
                 height: cardColumn.implicitHeight + 24
                 radius: 10
                 color: pill.color
-                border.color: "#2a2a2a"
-                border.width: 1
                 anchors.right: parent.left
-                anchors.rightMargin: 12
+                anchors.rightMargin: 26
                 anchors.verticalCenter: parent.verticalCenter
 
                 Column {
@@ -1087,6 +1085,26 @@ Item {
                       }
                     }
                   }
+                }
+
+                // Speech-bubble tail: the classic rotated-square trick.
+                // A small square, same color as the card, centered
+                // exactly on the card's right edge and rotated 45°. Half
+                // sits under the card (invisible, same color), half
+                // pokes out as a diamond corner reading as a pointer.
+                // Flush by construction: its center is pinned to the
+                // card's own edge. (Sibling of cardColumn, both direct
+                // children of detailCard -- verified via indentation
+                // after two earlier attempts landed this one level too
+                // high, as a sibling of detailCard instead of its child,
+                // which put it near the ring instead of the card.)
+                Rectangle {
+                  width: 16
+                  height: 16
+                  color: detailCard.color
+                  rotation: 45
+                  x: parent.width - width / 2
+                  anchors.verticalCenter: parent.verticalCenter
                 }
               }
             }
