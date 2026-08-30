@@ -221,6 +221,8 @@ Item {
   property string weatherLocationQuery: ""
   property real weatherLat: NaN
   property real weatherLon: NaN
+  property int weatherGeoRetries: 0
+  property int weatherOpenMeteoRetries: 0
 
   readonly property bool weatherKnown: root.weatherReady && !isNaN(root.weatherTempC)
   readonly property bool weatherWanted: root.configuredItems.indexOf("weather") !== -1
@@ -326,6 +328,33 @@ Item {
     }
   }
 
+  // wttr.in / open-meteo can be slow or flaky, especially right after
+  // waking with the network still down. Retry a few times before leaving
+  // it to the 15-minute refresh timer, same approach as the weather plugin.
+  function scheduleGeoRetry() {
+    if (root.weatherGeoRetries >= 3) return
+    root.weatherGeoRetries++
+    geoRetryTimer.restart()
+  }
+
+  Timer {
+    id: geoRetryTimer
+    interval: 2500
+    onTriggered: if (!geoProcess.running) geoProcess.running = true
+  }
+
+  function scheduleOpenMeteoRetry() {
+    if (root.weatherOpenMeteoRetries >= 3) return
+    root.weatherOpenMeteoRetries++
+    openMeteoRetryTimer.restart()
+  }
+
+  Timer {
+    id: openMeteoRetryTimer
+    interval: 2500
+    onTriggered: if (!openMeteoProcess.running) openMeteoProcess.running = true
+  }
+
   // Bootstraps lat/lon from wttr.in when weather.json has none configured
   // -- same path the bar widget takes, so the two agree.
   Process {
@@ -337,9 +366,10 @@ Item {
         try {
           var report = JSON.parse(String(text || ""))
           var area = report.nearest_area[0]
+          root.weatherGeoRetries = 0
           root.fetchOpenMeteo(parseFloat(area.latitude), parseFloat(area.longitude))
         } catch (e) {
-          root.weatherReady = false
+          root.scheduleGeoRetry()
         }
       }
     }
@@ -364,8 +394,9 @@ Item {
           root.weatherTodayMinC = parseFloat(report.daily.temperature_2m_min[0])
           root.weatherForecast = root.parseForecast(report.daily)
           root.weatherReady = true
+          root.weatherOpenMeteoRetries = 0
         } catch (e) {
-          root.weatherReady = false
+          root.scheduleOpenMeteoRetry()
         }
       }
     }
@@ -388,6 +419,8 @@ Item {
 
   function refreshWeather() {
     if (geoProcess.running || openMeteoProcess.running) return
+    root.weatherGeoRetries = 0
+    root.weatherOpenMeteoRetries = 0
     if (!isNaN(root.weatherLat) && !isNaN(root.weatherLon)) {
       root.fetchOpenMeteo(root.weatherLat, root.weatherLon)
     } else {
