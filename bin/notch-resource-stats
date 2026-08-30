@@ -1,0 +1,29 @@
+#!/bin/bash
+# Prints "<cpu_pct> <mem_pct>" using a short /proc/stat sample window.
+# Self-contained (no dependency on the separate sysmon plugin) so the notch
+# still works if that plugin is ever disabled or removed.
+
+read -r _ u1 n1 s1 i1 w1 irq1 sirq1 st1 _ < /proc/stat
+sleep 0.3
+read -r _ u2 n2 s2 i2 w2 irq2 sirq2 st2 _ < /proc/stat
+
+idle1=$((i1 + w1))
+idle2=$((i2 + w2))
+total1=$((u1 + n1 + s1 + i1 + w1 + irq1 + sirq1 + st1))
+total2=$((u2 + n2 + s2 + i2 + w2 + irq2 + sirq2 + st2))
+totald=$((total2 - total1))
+idled=$((idle2 - idle1))
+
+cpu=0
+if (( totald > 0 )); then
+  cpu=$(( (100 * (totald - idled)) / totald ))
+fi
+
+mem_total=$(awk '/^MemTotal:/{print $2}' /proc/meminfo)
+mem_avail=$(awk '/^MemAvailable:/{print $2}' /proc/meminfo)
+mem=0
+if (( mem_total > 0 )); then
+  mem=$(( (100 * (mem_total - mem_avail)) / mem_total ))
+fi
+
+echo "$cpu $mem"

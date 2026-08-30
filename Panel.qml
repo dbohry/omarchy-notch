@@ -7,26 +7,33 @@ import Quickshell.Hyprland
 
 // Hover-triggered edge notch. Collapsed: a small pill hugging the top-right
 // corner. Hovering it expands a vertical stack of ring meters -- one per AI
-// agent usage record already written by omarchy.agents' collectors, plus an
-// optional weather ring.
+// agent usage record already written by omarchy.agents' collectors, plus
+// optional weather / cpu / memory rings.
 //
-// What renders is driven entirely by ~/.config/omarchy/plugins/notch/settings.json:
+// What renders is driven entirely by ~/.config/omarchy/plugins/notch/settings.toml
+// (a small hand-rolled TOML subset -- see applySettings below -- chosen to
+// match shell.toml/colors.toml elsewhere in Omarchy, and because it allows
+// real "#" comments where JSON doesn't):
 //
-//   { "items": ["claude", "codex", "fireworks", "weather"], "size": "medium" }
+//   [items]
+//   claude = true      # Claude usage %, if omarchy.agents has a record for it
+//   codex = false       # Codex usage %, if omarchy.agents has a record for it
+//   fireworks = false   # Fireworks usage %, if omarchy.agents has a record for it
+//   weather = true       # condition emoji + temperature
+//   cpu = false           # current CPU load %
+//   memory = false        # current memory-used %
 //
-// "items" is an ordered list (render order = list order), one ring each:
-//   - an agent id ("claude" / "codex" / "fireworks" / ...) -- whatever
-//     omarchy.agents has written a usage record for
-//   - "weather"   the weather ring
+//   size = "medium"   # small | medium | large
 //
-// An entry with no matching data (an agent id with no usage record yet, or
-// an unrecognized string) is silently skipped rather than erroring. Missing
-// or unparseable settings.json falls back to every known agent plus weather
-// so the notch still does something useful out of the box. Edits hot-reload
-// -- no restart needed to see a settings.json change.
-//
-// "size" is "small" | "medium" | "large" (default "medium" if omitted or
-// unrecognized) -- scales ring size, spacing, and the collapsed pill.
+// Under [items], any other agent id omarchy.agents writes a usage record
+// for also works by that same id -- not just claude/codex/fireworks.
+// `true` lines render, in the order they appear in the file; `false` or
+// missing lines don't. A ring with no matching data (an agent id with no
+// usage record yet) is silently skipped rather than erroring. A missing
+// file, or one with no [items] section, falls back to every known agent
+// plus weather/cpu/memory so the notch still does something useful out of
+// the box. Edits hot-reload -- no restart needed to see a settings.toml
+// change.
 Item {
   id: root
   visible: false
@@ -116,21 +123,23 @@ Item {
 
   readonly property var iconFor: ({ "claude": "claude.svg", "codex": "codex.svg", "fireworks": "fireworks.svg" })
   readonly property var colorFor: ({ "claude": "#e8622c", "codex": "#3ecf6e", "fireworks": "#e0c93e" })
+  readonly property string cpuColor: "#ff7043"
+  readonly property string memoryColor: "#26c6a2"
 
   // ------------------------------------------------------------ settings
 
-  // Every currently-known agent plus weather -- used only when
-  // settings.json is missing or unparseable, so the notch still does
-  // something useful before it's been configured.
+  // Every currently-known agent plus weather, cpu, and memory -- used only
+  // when settings.toml is missing or has no [items] section, so the notch
+  // still does something useful before it's been configured.
   function defaultItems() {
-    return root.agentIds.concat(["weather"])
+    return root.agentIds.concat(["weather", "cpu", "memory"])
   }
 
   property var configuredItems: defaultItems()
 
   FileView {
     id: settingsFile
-    path: root.pluginDir + "/settings.json"
+    path: root.pluginDir + "/settings.toml"
     watchChanges: true
     printErrors: false
     onFileChanged: reload()
@@ -138,16 +147,42 @@ Item {
     onLoadFailed: root.configuredItems = root.defaultItems()
   }
 
+  // Same small hand-rolled TOML subset the shell itself uses for
+  // shell.toml/colors.toml (see Commons/Color.qml's parseShell): a
+  // "[section]" header, "key = value" pairs, "#" comments (full-line or
+  // trailing), no external parser dependency. Bare `true`/`false` under
+  // [items] toggles a ring on/off; encounter order in the file becomes
+  // render order.
   function applySettings(content) {
-    try {
-      var parsed = JSON.parse(String(content || "{}"))
-      root.configuredItems = Array.isArray(parsed.items) ? parsed.items : root.defaultItems()
-      root.sizeKey = root.sizePresets.hasOwnProperty(parsed.size) ? parsed.size : "medium"
-    } catch (e) {
-      console.warn("notch", "bad settings.json, using defaults", e)
-      root.configuredItems = root.defaultItems()
-      root.sizeKey = "medium"
+    var text = String(content || "")
+    var items = []
+    var sizeValue = ""
+    var section = ""
+    var sawItemsSection = false
+    var lines = text.split("\n")
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i].replace(/^\s+|\s+$/g, "")
+      if (!line || line.charAt(0) === "#") continue
+      var sectionMatch = line.match(/^\[([A-Za-z0-9_-]+)\]\s*(#.*)?$/)
+      if (sectionMatch) {
+        section = sectionMatch[1]
+        if (section === "items") sawItemsSection = true
+        continue
+      }
+      if (section === "items") {
+        var boolKv = line.match(/^([A-Za-z0-9_-]+)\s*=\s*(true|false)\s*(#.*)?$/)
+        if (boolKv && boolKv[2] === "true") items.push(boolKv[1])
+      } else if (section === "") {
+        // A true top-level key, meaning it must appear before any
+        // "[section]" header -- TOML sections are sticky to end of file,
+        // so a "size = ..." line placed after [items] would silently be
+        // read as (and fail to match) an items entry instead.
+        var sizeKv = line.match(/^size\s*=\s*["']?([A-Za-z]+)["']?\s*(#.*)?$/)
+        if (sizeKv) sizeValue = sizeKv[1]
+      }
     }
+    root.configuredItems = sawItemsSection ? items : root.defaultItems()
+    root.sizeKey = root.sizePresets.hasOwnProperty(sizeValue) ? sizeValue : "medium"
   }
 
   // ------------------------------------------------------------ agents
@@ -260,17 +295,74 @@ Item {
     onTriggered: root.refreshWeather()
   }
 
+  // -------------------------------------------------------- cpu / memory
+
+  property real cpuPercent: 0
+  property real memPercent: 0
+  property bool resourcesReady: false
+
+  readonly property bool resourcesWanted: root.configuredItems.indexOf("cpu") !== -1 || root.configuredItems.indexOf("memory") !== -1
+
+  function resourceEntry(id, label, percent, color) {
+    return {
+      type: "resource",
+      id: id,
+      label: label,
+      percent: percent / 100,
+      known: root.resourcesReady,
+      color: color
+    }
+  }
+
+  function cpuEntry() { return root.resourceEntry("cpu", "CPU", root.cpuPercent, root.cpuColor) }
+  function memoryEntry() { return root.resourceEntry("memory", "MEM", root.memPercent, root.memoryColor) }
+
+  // 0.3s /proc/stat sample window lives in the script, not here, so this
+  // stays a normal async Process instead of blocking the shell.
+  Process {
+    id: resourceProcess
+    command: [root.pluginDir + "/bin/notch-resource-stats"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var parts = String(text || "").trim().split(/\s+/)
+        if (parts.length === 2) {
+          root.cpuPercent = parseFloat(parts[0]) || 0
+          root.memPercent = parseFloat(parts[1]) || 0
+          root.resourcesReady = true
+        }
+      }
+    }
+  }
+
+  function refreshResources() {
+    if (!resourceProcess.running) resourceProcess.running = true
+  }
+
+  Timer {
+    interval: 3000
+    running: root.resourcesWanted
+    repeat: true
+    triggeredOnStart: true
+    onTriggered: root.refreshResources()
+  }
+
   // ------------------------------------------------------- combined model
 
-  // Walks configuredItems in order, resolving each entry (a specific agent
-  // id, or "weather") to at most one ring. Anything unrecognized, or an
-  // agent id with no usage record yet, is skipped rather than erroring.
+  // Walks configuredItems in order, resolving each entry ("weather", "cpu",
+  // "memory", or a specific agent id) to at most one ring. Anything
+  // unrecognized, or an agent id with no usage record yet, is skipped
+  // rather than erroring.
   function itemsModel() {
     var out = []
     for (var i = 0; i < root.configuredItems.length; i++) {
       var key = root.configuredItems[i]
       if (key === "weather") {
         out.push(root.weatherEntry())
+      } else if (key === "cpu") {
+        out.push(root.cpuEntry())
+      } else if (key === "memory") {
+        out.push(root.memoryEntry())
       } else {
         var single = root.agentEntry(key)
         if (single) out.push(single)
@@ -413,8 +505,10 @@ Item {
                   }
                 }
               }
+              // Agents and cpu/memory both have a real percent to fill;
+              // weather doesn't, so its ring stays a static outline.
               Shape {
-                visible: modelData.type === "agent"
+                visible: modelData.type === "agent" || modelData.type === "resource"
                 anchors.fill: parent
                 ShapePath {
                   strokeWidth: root.ringStroke
@@ -431,10 +525,10 @@ Item {
                   }
                 }
               }
-              // Same layout for both: an icon centered in the ring, a value
-              // below it. Agents get their brand mark and a percent; weather
-              // gets a condition emoji and the temperature. Weather's ring
-              // stays a static outline since it has no meaningful percent.
+              // Same layout for all three: an icon centered in the ring, a
+              // value below it. Agents get their brand mark and a percent;
+              // cpu/memory get a short text label and a percent; weather
+              // gets a condition emoji and the temperature.
               Image {
                 visible: modelData.type === "agent"
                 source: modelData.type === "agent" ? ("file://" + modelData.icon) : ""
@@ -450,6 +544,16 @@ Item {
                 anchors.centerIn: parent
                 text: modelData.type === "weather" ? modelData.emoji : ""
                 font.pixelSize: root.ringSize * 0.42
+              }
+              // cpu/memory have no icon either, just a short label ("CPU" /
+              // "MEM") smaller than the emoji so three-plus letters fit.
+              Text {
+                visible: modelData.type === "resource"
+                anchors.centerIn: parent
+                text: modelData.type === "resource" ? modelData.label : ""
+                color: "#e6e6e6"
+                font.pixelSize: root.ringSize * 0.24
+                font.bold: true
               }
             }
             Text {
