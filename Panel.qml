@@ -3,6 +3,7 @@ import QtQuick.Shapes
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
+import Quickshell.Hyprland
 
 // Hover-triggered edge notch. Collapsed: a small pill hugging the top-right
 // corner. Hovering it expands a vertical stack of ring meters, one per AI
@@ -18,6 +19,53 @@ Item {
   readonly property string assetsDir: "/usr/share/omarchy/shell/plugins/agents/assets"
 
   property bool expanded: false
+
+  // Hyprland's own "fullscreen" flag only fires for a true xdg-shell
+  // fullscreen request. Games running borderless-fullscreen (and some
+  // browsers' fullscreen video) are just a plain window sized to the
+  // monitor, so that flag stays false -- checked with `hyprctl activewindow -j`
+  // against a borderless game and it reported "fullscreen": 0. Comparing
+  // the active window's geometry to its monitor's resolution catches both
+  // cases, and matters beyond hiding the popup: any visible layer-shell
+  // surface here, even fully transparent, blocks Hyprland's direct-scanout
+  // path for whatever fullscreen client is under it, which is what capped
+  // an Overwatch session at ~72fps instead of 144fps with this plugin on.
+  readonly property var activeToplevel: Hyprland.activeToplevel
+  readonly property var activeMonitor: activeToplevel ? activeToplevel.monitor : null
+  // Percentage tolerance, not a fixed pixel count: Omarchy's default
+  // gaps_out (10) + border_size (2) inset a merely-maximized window a few
+  // px from the true monitor edges on every side, which a tight pixel
+  // tolerance missed entirely. 3% of a 3840x2160 monitor is ~115x65px --
+  // comfortably absorbs any reasonable gaps/border config while still
+  // excluding a normal, non-maximized window.
+  readonly property bool borderlessFullscreen: {
+    if (!activeToplevel || !activeMonitor) return false
+    var ipc = activeToplevel.lastIpcObject
+    if (!ipc || !ipc.size || !ipc.at) return false
+    var tolW = activeMonitor.width * 0.03
+    var tolH = activeMonitor.height * 0.03
+    return Math.abs(ipc.size[0] - activeMonitor.width) <= tolW
+      && Math.abs(ipc.size[1] - activeMonitor.height) <= tolH
+      && Math.abs(ipc.at[0] - activeMonitor.x) <= tolW
+      && Math.abs(ipc.at[1] - activeMonitor.y) <= tolH
+  }
+  readonly property bool trueFullscreen: Hyprland.focusedWorkspace !== null && Hyprland.focusedWorkspace.hasFullscreen
+  readonly property bool fullscreenActive: trueFullscreen || borderlessFullscreen
+  onFullscreenActiveChanged: if (fullscreenActive) root.expanded = false
+
+  // Quickshell doesn't refresh a toplevel's cached geometry/fullscreen state
+  // for every Hyprland event -- going fullscreen on a window that was
+  // already focused (no focus change involved) left lastIpcObject and
+  // hasFullscreen stale, so the notch never disappeared for fullscreen
+  // video in an already-focused browser tab. Forcing a refresh on every
+  // raw IPC event closes that gap.
+  Connections {
+    target: Hyprland
+    function onRawEvent(event) {
+      Hyprland.refreshToplevels()
+      Hyprland.refreshWorkspaces()
+    }
+  }
   property var agentIds: []
   property var records: ({})
 
@@ -111,7 +159,13 @@ Item {
 
   PanelWindow {
     id: panel
-    visible: true
+    // Withdraw the layer-shell surface entirely during fullscreen -- not
+    // just the pill's hit region -- so Hyprland has nothing else to
+    // composite over the fullscreen client and can keep direct scanout
+    // (the path that gets a fullscreen game to full refresh rate). Any
+    // visible surface here, even fully transparent, forces the compositor
+    // onto the slower composited path for the whole output.
+    visible: !root.fullscreenActive
     anchors { top: true; right: true; bottom: true; left: true }
     color: "transparent"
     WlrLayershell.namespace: "notch"
@@ -133,14 +187,18 @@ Item {
       anchors.right: parent.right
       anchors.topMargin: root.topMargin
       anchors.rightMargin: root.rightMargin
-      width: root.expanded ? root.expandedW : root.collapsedW
-      height: root.expanded ? (root.rowGap + (root.ringSize + root.rowGap) * agentColumn.count + 56) : root.collapsedH
+      visible: !root.fullscreenActive
+      // Collapse to zero size (not just hidden) while a window is fullscreen
+      // so the layer-shell mask leaves no hoverable/clickable region there.
+      width: root.fullscreenActive ? 0 : (root.expanded ? root.expandedW : root.collapsedW)
+      height: root.fullscreenActive ? 0 : (root.expanded ? (root.rowGap + (root.ringSize + root.rowGap) * agentColumn.count + 56) : root.collapsedH)
 
       Behavior on width { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
       Behavior on height { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
 
       HoverHandler {
-        onHoveredChanged: root.expanded = hovered
+        enabled: !root.fullscreenActive
+        onHoveredChanged: root.expanded = hovered && !root.fullscreenActive
       }
 
       Column {
