@@ -22,7 +22,8 @@ import Quickshell.Hyprland
 //   weather = true       # condition emoji + temperature; hover for
 //                        # feels-like/humidity/wind, today's high/low,
 //                        # and a 3-day forecast
-//   cpu = false           # current CPU load %
+//   cpu = false           # current CPU load %; hover for clock speed,
+//                        # load average, and top processes by CPU use
 //   memory = false        # current memory-used %; hover for used/total
 //                        # (and swap, if configured)
 //   download = false      # current download rate
@@ -256,6 +257,16 @@ Item {
     if (percent >= 0.9) return "#e05d5d"
     if (percent >= 0.6) return "#e0c93e"
     return "#3ecf6e"
+  }
+
+  // Progressively darker shades of the cpu accent color for the top-3
+  // processes' bar segments and bullet dots -- rank 0 is the full color,
+  // each rank after that a bit darker, so "which segment is which row"
+  // is readable without needing 3 unrelated colors.
+  function cpuSegmentColor(rank) {
+    if (rank === 0) return root.cpuColor
+    if (rank === 1) return Qt.darker(root.cpuColor, 1.5)
+    return Qt.darker(root.cpuColor, 2.2)
   }
 
   // resetsAt comes through as an ISO datetime string (or "" when the
@@ -501,6 +512,13 @@ Item {
   property real memAvailKb: 0
   property real swapTotalKb: 0
   property real swapFreeKb: 0
+  // Top CPU-consuming processes: [{name, percent}, ...], up to 3, plus
+  // cpuOtherPercent for everything not in that list. Same /proc/stat
+  // sampling window as cpuPercent, normalized the same way (against
+  // system-wide tick delta, not per-core), so top3 + other sums close to
+  // cpuPercent -- see notch-resource-stats.
+  property var cpuTopProcesses: []
+  property real cpuOtherPercent: 0
   property bool resourcesReady: false
 
   readonly property bool resourcesWanted: root.configuredItems.indexOf("cpu") !== -1 || root.configuredItems.indexOf("memory") !== -1
@@ -526,6 +544,8 @@ Item {
     e.load1 = root.load1
     e.load5 = root.load5
     e.load15 = root.load15
+    e.topProcesses = root.cpuTopProcesses
+    e.otherPercent = root.cpuOtherPercent
     return e
   }
   // memory carries used/total (and swap, if any is configured) for its
@@ -549,7 +569,8 @@ Item {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        var parts = String(text || "").trim().split(/\s+/)
+        var lines = String(text || "").split("\n")
+        var parts = (lines[0] || "").trim().split(/\s+/)
         if (parts.length === 10) {
           root.cpuPercent = parseFloat(parts[0]) || 0
           root.memPercent = parseFloat(parts[1]) || 0
@@ -562,6 +583,22 @@ Item {
           root.swapTotalKb = parseFloat(parts[8]) || 0
           root.swapFreeKb = parseFloat(parts[9]) || 0
           root.resourcesReady = true
+
+          var top = []
+          var other = 0
+          for (var i = 1; i < lines.length; i++) {
+            var line = lines[i]
+            if (!line) continue
+            var fields = line.split("\t")
+            if (fields.length !== 2) continue
+            if (fields[0] === "__OTHER__") {
+              other = parseFloat(fields[1]) || 0
+            } else {
+              top.push({ name: fields[0], percent: parseFloat(fields[1]) || 0 })
+            }
+          }
+          root.cpuTopProcesses = top
+          root.cpuOtherPercent = other
         }
       }
     }
@@ -907,7 +944,7 @@ Item {
                 readonly property bool isMemoryCard: entry.id === "memory"
                 readonly property bool isWeatherCard: entry.type === "weather" && entry.known
                 visible: ringHover.hovered && (isAgentCard || isCpuCard || isMemoryCard || isWeatherCard)
-                width: isWeatherCard ? 280 : 220
+                width: isWeatherCard ? 280 : isCpuCard ? 240 : 220
                 height: cardColumn.implicitHeight + 24
                 radius: 10
                 color: pill.color
@@ -922,12 +959,12 @@ Item {
                   spacing: 10
 
                   Row {
-                    // Weather has its own hero line doing this job
-                    // instead (icon + big temp reads as "this is
-                    // weather" on its own) -- a second "Weather" label
-                    // above it would be redundant, unlike the other
-                    // card types which have no such hero.
-                    visible: !detailCard.isWeatherCard
+                    // Weather and cpu each have their own hero line doing
+                    // this job instead (icon+temp / big % reads as "this
+                    // is weather/CPU" on its own) -- a second title label
+                    // above it would be redundant, unlike the other card
+                    // types which have no such hero.
+                    visible: !detailCard.isWeatherCard && !detailCard.isCpuCard
                     spacing: 8
                     Image {
                       visible: entry.type === "agent"
@@ -1134,46 +1171,157 @@ Item {
                     }
                   }
 
-                  // cpu-only rows: clock speed and load average -- both
-                  // plain /proc and /sys reads, no lm-sensors dependency,
-                  // so no temperature here (see notch-resource-stats).
-                  Column {
+                  // cpu hero: big "% / CPU in use" on the left, clock
+                  // speed + load average stacked top-right -- same
+                  // /proc reads as before, just laid out as a focal
+                  // point instead of two label:value rows.
+                  Item {
                     visible: detailCard.isCpuCard
-                    width: cardColumn.width
-                    spacing: 8
-
-                    Item {
-                      width: parent.width
-                      height: 16
+                    width: parent.width
+                    height: 40
+                    Column {
+                      anchors.left: parent.left
+                      anchors.bottom: parent.bottom
+                      spacing: 0
                       Text {
-                        anchors.left: parent.left
-                        text: "Clock speed"
-                        color: "#cfcfcf"
-                        font.pixelSize: 11
+                        text: detailCard.isCpuCard ? Math.round(entry.percent * 100) + "%" : ""
+                        color: "#f2f2f2"
+                        font.pixelSize: 30
+                        font.bold: true
                       }
                       Text {
-                        anchors.right: parent.right
-                        text: detailCard.isCpuCard ? (entry.freqMhz / 1000).toFixed(2) + " GHz" : ""
-                        color: "#f2f2f2"
+                        text: "CPU in use"
+                        color: "#8a8a8a"
                         font.pixelSize: 11
+                      }
+                    }
+                    Text {
+                      id: cpuFreqLabel
+                      anchors.right: parent.right
+                      anchors.top: parent.top
+                      text: detailCard.isCpuCard ? (entry.freqMhz / 1000).toFixed(2) + " GHz" : ""
+                      color: "#9a9aa5"
+                      font.pixelSize: 11
+                    }
+                    Text {
+                      anchors.right: parent.right
+                      anchors.top: cpuFreqLabel.bottom
+                      anchors.topMargin: 2
+                      text: detailCard.isCpuCard
+                        ? (entry.load1.toFixed(2) + " / " + entry.load5.toFixed(2) + " / " + entry.load15.toFixed(2))
+                        : ""
+                      color: "#9a9aa5"
+                      font.pixelSize: 11
+                    }
+                  }
+
+                  // Segmented usage bar: the "used" portion of the track
+                  // (width = overall cpu%) is split into shaded segments
+                  // for each top process plus "everything else", so the
+                  // bar itself previews the breakdown the rows below spell
+                  // out in full.
+                  Item {
+                    visible: detailCard.isCpuCard
+                    width: parent.width
+                    height: 8
+
+                    Rectangle {
+                      anchors.fill: parent
+                      radius: height / 2
+                      color: "#333333"
+                    }
+                    Row {
+                      id: cpuSegRow
+                      height: parent.height
+                      width: parent.width * (detailCard.isCpuCard ? Math.max(0, Math.min(1, entry.percent)) : 0)
+                      readonly property real usedSum: {
+                        if (!detailCard.isCpuCard) return 0
+                        var s = entry.otherPercent
+                        for (var i = 0; i < entry.topProcesses.length; i++) s += entry.topProcesses[i].percent
+                        return s
+                      }
+
+                      Repeater {
+                        model: detailCard.isCpuCard ? entry.topProcesses : []
+                        Rectangle {
+                          width: cpuSegRow.usedSum > 0 ? cpuSegRow.width * (modelData.percent / cpuSegRow.usedSum) : 0
+                          height: cpuSegRow.height
+                          color: root.cpuSegmentColor(index)
+                        }
+                      }
+                      Rectangle {
+                        visible: detailCard.isCpuCard && entry.otherPercent > 0
+                        width: cpuSegRow.usedSum > 0 ? cpuSegRow.width * (entry.otherPercent / cpuSegRow.usedSum) : 0
+                        height: cpuSegRow.height
+                        color: "#555555"
+                      }
+                    }
+                  }
+
+                  // Process list: colored dot matching the bar segment's
+                  // shade, name (the kernel's own truncated comm, up to
+                  // 15 chars -- no prettier-name lookup exists), percent.
+                  Column {
+                    visible: detailCard.isCpuCard
+                    width: parent.width
+                    spacing: 6
+
+                    Repeater {
+                      model: detailCard.isCpuCard ? entry.topProcesses : []
+                      Item {
+                        width: parent.width
+                        height: 16
+                        Rectangle {
+                          width: 8
+                          height: 8
+                          radius: 2
+                          anchors.left: parent.left
+                          anchors.verticalCenter: parent.verticalCenter
+                          color: root.cpuSegmentColor(index)
+                        }
+                        Text {
+                          anchors.left: parent.left
+                          anchors.leftMargin: 14
+                          anchors.verticalCenter: parent.verticalCenter
+                          text: modelData.name
+                          color: "#e6e6e6"
+                          font.pixelSize: 11
+                        }
+                        Text {
+                          anchors.right: parent.right
+                          anchors.verticalCenter: parent.verticalCenter
+                          text: modelData.percent.toFixed(1) + "%"
+                          color: "#e6e6e6"
+                          font.pixelSize: 11
+                        }
                       }
                     }
 
                     Item {
+                      visible: detailCard.isCpuCard && entry.otherPercent > 0
                       width: parent.width
                       height: 16
+                      Rectangle {
+                        width: 8
+                        height: 8
+                        radius: 2
+                        anchors.left: parent.left
+                        anchors.verticalCenter: parent.verticalCenter
+                        color: "#555555"
+                      }
                       Text {
                         anchors.left: parent.left
-                        text: "Load avg (1/5/15m)"
-                        color: "#cfcfcf"
+                        anchors.leftMargin: 14
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "Everything else"
+                        color: "#9a9a9a"
                         font.pixelSize: 11
                       }
                       Text {
                         anchors.right: parent.right
-                        text: detailCard.isCpuCard
-                          ? (entry.load1.toFixed(2) + " / " + entry.load5.toFixed(2) + " / " + entry.load15.toFixed(2))
-                          : ""
-                        color: "#f2f2f2"
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: detailCard.isCpuCard ? entry.otherPercent.toFixed(1) + "%" : ""
+                        color: "#9a9a9a"
                         font.pixelSize: 11
                       }
                     }
