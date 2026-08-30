@@ -87,27 +87,22 @@ echo "$cpu $mem $load1 $load5 $load15 ${freq_mhz:-0} ${mem_total:-0} ${mem_avail
 # does it, instead of top/htop's per-core-normalized convention where
 # processes can individually read over 100%.
 if (( totald > 0 )); then
-  awk -F'\t' -v totald="$totald" '
+  awk -F'\t' '
     NR == FNR { t1[$1] = $3; next }
     {
       pid = $1; comm = $2; t2 = $3
       if (pid in t1) {
         d = t2 - t1[pid]
-        if (d > 0) {
-          printf "%d\t%s\n", d, comm
-          sum += d
-        }
+        if (d > 0) printf "%d\t%s\n", d, comm
       }
     }
-    END { print "__SUM__\t" sum > "/dev/stderr" }
-  ' "$sample_dir/p1" "$sample_dir/p2" 2> "$sample_dir/sum" \
-    | sort -t $'\t' -k1,1rn > "$sample_dir/ranked"
+  ' "$sample_dir/p1" "$sample_dir/p2" | sort -t $'\t' -k1,1rn > "$sample_dir/ranked"
 
-  total_delta=$(awk -F'\t' '{print $2}' "$sample_dir/sum")
+  total_delta=$(awk -F'\t' '{s+=$1} END{print s+0}' "$sample_dir/ranked")
+  top_delta=$(head -n 3 "$sample_dir/ranked" | awk -F'\t' '{s+=$1} END{print s+0}')
   head -n 3 "$sample_dir/ranked" | while IFS=$'\t' read -r delta comm; do
     awk -v d="$delta" -v c="$comm" -v t="$totald" 'BEGIN { printf "%s\t%.1f\n", c, (100*d/t) }'
   done
-  top_delta=$(head -n 3 "$sample_dir/ranked" | awk -F'\t' '{s+=$1} END{print s+0}')
   other_delta=$(( total_delta - top_delta ))
   if (( other_delta > 0 )); then
     awk -v d="$other_delta" -v t="$totald" 'BEGIN { printf "__OTHER__\t%.1f\n", (100*d/t) }'

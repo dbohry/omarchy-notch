@@ -55,15 +55,13 @@ Item {
   property bool expanded: false
 
   // Hyprland's own "fullscreen" flag only fires for a true xdg-shell
-  // fullscreen request. Games running borderless-fullscreen (and some
-  // browsers' fullscreen video) are just a plain window sized to the
-  // monitor, so that flag stays false -- checked with `hyprctl activewindow -j`
-  // against a borderless game and it reported "fullscreen": 0. Comparing
-  // the active window's geometry to its monitor's resolution catches both
-  // cases, and matters beyond hiding the popup: any visible layer-shell
-  // surface here, even fully transparent, blocks Hyprland's direct-scanout
-  // path for whatever fullscreen client is under it, which is what capped
-  // an Overwatch session at ~72fps instead of 144fps with this plugin on.
+  // fullscreen request -- a borderless-fullscreen game or browser video
+  // is just a plain window sized to the monitor, so that flag stays
+  // false. Comparing the active window's geometry to its monitor's
+  // resolution catches both cases. This matters beyond hiding the popup:
+  // any visible layer-shell surface here, even fully transparent, blocks
+  // Hyprland's direct-scanout path for whatever fullscreen client is
+  // under it, capping its framerate to the composited path.
   readonly property var activeToplevel: Hyprland.activeToplevel
   readonly property var activeMonitor: activeToplevel ? activeToplevel.monitor : null
   // Percentage tolerance, not a fixed pixel count: Omarchy's default
@@ -206,12 +204,10 @@ Item {
   readonly property var displayNameFor: ({ "claude": "Claude", "codex": "Codex", "fireworks": "Fireworks" })
 
   // Never returns null/undefined -- always a well-formed object, even for
-  // an id with no usage record yet (available: false). The ring delegate
-  // binds straight to this via a property (see the ring Repeater below),
-  // so every child binding underneath needs something safe to dereference
-  // whether or not there's real data; a null here would throw the moment
-  // any child tried to read entry.type/.color/etc, regardless of the
-  // delegate's own `visible: entry.available` hiding it.
+  // an id with no usage record yet (available: false). Every ring
+  // delegate binds straight to this (see entryFor below), so a null
+  // would throw the moment a child binding dereferenced it, regardless
+  // of `visible: entry.available` hiding the delegate.
   function agentEntry(id) {
     var rec = root.records[id]
     if (!rec) {
@@ -302,19 +298,11 @@ Item {
   readonly property bool weatherKnown: root.weatherReady && !isNaN(root.weatherTempC)
   readonly property bool weatherWanted: root.configuredItems.indexOf("weather") !== -1
 
-  // Open-Meteo uses WMO weather codes -- a different numbering scheme than
-  // wttr.in's. Matters because this now has to match the existing weather
-  // bar widget's own numbers: that widget always ends up sourcing its
-  // forecast (and, once it has coordinates, current conditions too) from
-  // Open-Meteo, even for an auto-detected location -- it bootstraps
-  // lat/lon from a quick wttr.in lookup first, then calls Open-Meteo. This
-  // mirrors that exact path so the two don't disagree.
-  // isDay is Open-Meteo's own current.is_day (1/0) -- only meaningful for
-  // the live ring/card icon. Forecast days call this without it (defaults
-  // true), since a whole-day forecast doesn't have a single day/night
-  // state to show. Only clear and partly-cloudy get a night variant; the
-  // rest (cloudy/fog/rain/snow/storm) read fine as the same icon either
-  // way.
+  // code is an Open-Meteo WMO weather code. isDay (current.is_day, 1/0)
+  // is only meaningful for the live ring/card icon -- forecast days call
+  // this without it (defaults true), since a whole day has no single
+  // day/night state. Only clear and partly-cloudy get a night variant;
+  // the rest read fine as the same icon either way.
   function weatherEmoji(code, isDay) {
     var c = parseInt(String(code || "0"), 10)
     var day = isDay === undefined || isDay
@@ -499,7 +487,6 @@ Item {
     onTriggered: root.refreshWeather()
   }
 
-
   // -------------------------------------------------------- cpu / memory
 
   property real cpuPercent: 0
@@ -548,6 +535,7 @@ Item {
     e.otherPercent = root.cpuOtherPercent
     return e
   }
+
   // memory carries used/total (and swap, if any is configured) for its
   // hover detail card -- same /proc/meminfo read the ring's percent
   // already comes from, just a couple more fields out of it.
@@ -627,9 +615,6 @@ Item {
 
   readonly property bool networkWanted: root.configuredItems.indexOf("download") !== -1 || root.configuredItems.indexOf("upload") !== -1
 
-  // Rates, not percents, so these have no fill -- same static-outline
-  // treatment as weather. Center gets an arrow instead of a brand icon,
-  // reusing the "resource" type's short-label rendering (see Panel below).
   function formatRate(bytesPerSec) {
     if (bytesPerSec < 1024) return Math.round(bytesPerSec) + "B/s"
     if (bytesPerSec < 1024 * 1024) return (bytesPerSec / 1024).toFixed(1) + "K/s"
@@ -684,23 +669,20 @@ Item {
   // ------------------------------------------------------- combined model
 
   // Resolves one configuredItems key ("weather", "cpu", "memory",
-  // "download", "upload", or a specific agent id) to its ring data, or
-  // null if there's nothing to show for it yet (an agent id with no usage
-  // record, or an unrecognized key).
+  // "download", "upload", or a specific agent id) to its ring data.
+  // Always a well-formed object (see agentEntry) -- `.available` says
+  // whether there's real data to show yet.
   //
-  // The ring Repeater below binds its model directly to configuredItems
-  // (not to a per-poll list of resolved entries) specifically so that
-  // model array stays the same object across a data refresh -- it only
-  // actually changes when settings.toml's [items] changes. Each delegate
-  // then calls this itself to get its own live data. That split matters:
-  // Repeater tears down and recreates every delegate whenever the array
-  // *reference* it's bound to changes, even to an equivalent array, which
-  // is exactly what a fresh `out.push(...)` array on every single cpu/mem
-  // poll (every 3s) was doing -- destroying and rebuilding every ring's
-  // HoverHandler mid-hover, which is why a card would close the instant
-  // the value it was showing updated. Binding each delegate's own data
-  // through a property instead keeps the delegate (and its hover state)
-  // alive across refreshes; only that property's value changes.
+  // The ring Repeater below binds its model directly to configuredItems,
+  // not to a per-poll list of resolved entries, so that array stays the
+  // same object across a data refresh -- it only changes when
+  // settings.toml's [items] changes. Each delegate calls this itself for
+  // its own live data instead. That split matters: Repeater tears down
+  // and recreates every delegate whenever the array *reference* it's
+  // bound to changes, even to an equivalent array -- which a fresh
+  // `out.push(...)` array on every cpu/mem poll (every 3s) was doing,
+  // destroying and rebuilding every ring's HoverHandler mid-hover and
+  // closing any open card the instant its value updated.
   function entryFor(key) {
     if (key === "weather") return root.weatherEntry()
     if (key === "cpu") return root.cpuEntry()
@@ -888,10 +870,9 @@ Item {
               // emoji, sized to roughly match the agent icons' footprint.
               // font.family is pinned explicitly: fontconfig's default
               // match for some of these codepoints (clear-sky "☀" in
-              // particular) picked a plain UI font over the emoji font,
-              // rendering a monochrome fallback glyph instead of the
-              // actual icon -- confirmed via `fc-match -a :charset=2600`
-              // resolving to Adwaita Mono, not Noto Color Emoji.
+              // particular) resolves to a plain UI font instead of the
+              // emoji font, rendering a monochrome fallback glyph rather
+              // than the actual icon.
               Text {
                 visible: entry.type === "weather"
                 anchors.centerIn: parent
@@ -1415,12 +1396,9 @@ Item {
                   // others, which 3 stacked numbers didn't really convey.
                   Column {
                     id: forecastRows
-                    // entry.forecast only exists on a weather entry --
-                    // every other card type's entry has no such field at
-                    // all (not even an empty array), and this Column is
-                    // present (if invisible) in every delegate, so a
-                    // bare entry.forecast.length blew up on every
-                    // non-weather ring the instant this file loaded.
+                    // entry.forecast only exists on a weather entry; this
+                    // Column exists (if invisible) in every ring's card,
+                    // so the fallback keeps non-weather entries safe.
                     readonly property var fc: entry.forecast || []
                     visible: detailCard.isWeatherCard && fc.length > 0
                     width: cardColumn.width
@@ -1498,17 +1476,13 @@ Item {
                   }
                 }
 
-                // Speech-bubble tail: the classic rotated-square trick.
-                // A small square, same color as the card, centered
-                // exactly on the card's right edge and rotated 45°. Half
-                // sits under the card (invisible, same color), half
-                // pokes out as a diamond corner reading as a pointer.
-                // Flush by construction: its center is pinned to the
-                // card's own edge. (Sibling of cardColumn, both direct
-                // children of detailCard -- verified via indentation
-                // after two earlier attempts landed this one level too
-                // high, as a sibling of detailCard instead of its child,
-                // which put it near the ring instead of the card.)
+                // Speech-bubble tail: a small square, same color as the
+                // card, centered on the card's own right edge and
+                // rotated 45°. Half sits under the card (invisible, same
+                // color), half pokes out as a diamond corner reading as
+                // a pointer. Must be a child of detailCard (not a
+                // sibling) so "parent" below resolves to the card, not
+                // the ring.
                 Rectangle {
                   width: 16
                   height: 16
