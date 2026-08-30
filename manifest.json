@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "notch",
+  "name": "Notch",
+  "version": "1.0.0",
+  "author": "dbohry",
+  "description": "Hover-triggered edge notch showing AI agent usage rings",
+  "kinds": ["panel"],
+  "keepLoaded": true,
+  "entryPoints": { "panel": "Panel.qml" }
+}
