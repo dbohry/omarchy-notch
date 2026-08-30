@@ -20,7 +20,8 @@ import Quickshell.Hyprland
 //   codex = false       # Codex usage %, if omarchy.agents has a record for it
 //   fireworks = false   # Fireworks usage %, if omarchy.agents has a record for it
 //   weather = true       # condition emoji + temperature; hover for
-//                        # feels-like/humidity/wind and a 3-day forecast
+//                        # feels-like/humidity/wind, today's high/low,
+//                        # and a 3-day forecast
 //   cpu = false           # current CPU load %
 //   memory = false        # current memory-used %; hover for used/total
 //                        # (and swap, if configured)
@@ -275,7 +276,11 @@ Item {
   property real weatherHumidity: NaN
   property real weatherWindKmph: NaN
   property string weatherWindDir: ""
-  // Next 3 days (today is the ring/card's own "now" already) -- each
+  // Today's high/low (daily.*[0] in the same Open-Meteo response the
+  // 3-day forecast comes from -- index 0 is today, just unused before).
+  property real weatherTodayMaxC: NaN
+  property real weatherTodayMinC: NaN
+  // Next 3 days (index 1-3; today is index 0, see above) -- each
   // {dayLabel, emoji, maxC, minC}.
   property var weatherForecast: []
   property bool weatherReady: false
@@ -313,6 +318,23 @@ Item {
     return "⛅"
   }
 
+  // Short condition label for the chip badge -- same WMO code buckets as
+  // weatherEmoji, just text instead of a glyph. Not day/night-aware:
+  // "Clear" reads fine as a chip label regardless of whether the ring
+  // itself is showing a sun or a moon for it.
+  function weatherConditionText(code) {
+    var c = parseInt(String(code || "0"), 10)
+    if (c === 0) return "Clear"
+    if (c === 1 || c === 2) return "Partly cloudy"
+    if (c === 3) return "Cloudy"
+    if (c === 45 || c === 48) return "Fog"
+    if ([51, 53, 55, 56, 57].indexOf(c) !== -1) return "Drizzle"
+    if ([61, 63, 65, 66, 67, 80, 81, 82].indexOf(c) !== -1) return "Rain"
+    if ([71, 73, 75, 77, 85, 86].indexOf(c) !== -1) return "Snow"
+    if ([95, 96, 99].indexOf(c) !== -1) return "Thunderstorm"
+    return "Cloudy"
+  }
+
   function degToCompass(deg) {
     var dirs = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
     return dirs[Math.round(deg / 22.5) % 16]
@@ -344,12 +366,16 @@ Item {
       percent: 0,
       known: root.weatherKnown,
       temp: root.weatherKnown ? Math.round(root.weatherTempC) + "°" : "--",
+      tempRawC: root.weatherTempC,
       emoji: root.weatherKnown ? weatherEmoji(root.weatherCode, root.weatherIsDay) : "⛅",
+      conditionText: root.weatherKnown ? weatherConditionText(root.weatherCode) : "",
       color: "#5db8e8",
       feelsLikeC: root.weatherFeelsLikeC,
       humidity: root.weatherHumidity,
       windKmph: root.weatherWindKmph,
       windDir: root.weatherWindDir,
+      todayMaxC: root.weatherTodayMaxC,
+      todayMinC: root.weatherTodayMinC,
       forecast: root.weatherForecast
     }
   }
@@ -419,6 +445,8 @@ Item {
           root.weatherHumidity = parseFloat(current.relative_humidity_2m)
           root.weatherWindKmph = parseFloat(current.wind_speed_10m)
           root.weatherWindDir = isNaN(parseFloat(current.wind_direction_10m)) ? "" : root.degToCompass(parseFloat(current.wind_direction_10m))
+          root.weatherTodayMaxC = parseFloat(report.daily.temperature_2m_max[0])
+          root.weatherTodayMinC = parseFloat(report.daily.temperature_2m_min[0])
           root.weatherForecast = root.parseForecast(report.daily)
           root.weatherReady = true
         } catch (e) {
@@ -879,7 +907,7 @@ Item {
                 readonly property bool isMemoryCard: entry.id === "memory"
                 readonly property bool isWeatherCard: entry.type === "weather" && entry.known
                 visible: ringHover.hovered && (isAgentCard || isCpuCard || isMemoryCard || isWeatherCard)
-                width: isWeatherCard ? 260 : 220
+                width: isWeatherCard ? 280 : 220
                 height: cardColumn.implicitHeight + 24
                 radius: 10
                 color: pill.color
@@ -894,6 +922,12 @@ Item {
                   spacing: 10
 
                   Row {
+                    // Weather has its own hero line doing this job
+                    // instead (icon + big temp reads as "this is
+                    // weather" on its own) -- a second "Weather" label
+                    // above it would be redundant, unlike the other
+                    // card types which have no such hero.
+                    visible: !detailCard.isWeatherCard
                     spacing: 8
                     Image {
                       visible: entry.type === "agent"
@@ -913,6 +947,145 @@ Item {
                       font.pixelSize: 14
                       font.bold: true
                       anchors.verticalCenter: parent.verticalCenter
+                    }
+                  }
+
+                  // Weather hero: big icon + big current temp on the
+                  // left, "feels X°" pinned top-right -- the card's
+                  // actual focal point, replacing what used to be just
+                  // another small gray text row.
+                  Item {
+                    visible: detailCard.isWeatherCard
+                    width: parent.width
+                    height: 40
+                    Row {
+                      anchors.left: parent.left
+                      anchors.bottom: parent.bottom
+                      spacing: 10
+                      Text {
+                        text: detailCard.isWeatherCard ? entry.emoji : ""
+                        font.family: "Noto Color Emoji"
+                        font.pixelSize: 34
+                      }
+                      Text {
+                        text: detailCard.isWeatherCard ? entry.temp : ""
+                        color: "#f2f2f2"
+                        font.pixelSize: 34
+                        font.bold: true
+                      }
+                    }
+                    Text {
+                      anchors.right: parent.right
+                      anchors.top: parent.top
+                      text: detailCard.isWeatherCard ? ("feels " + Math.round(entry.feelsLikeC) + "°") : ""
+                      color: "#8a8a8a"
+                      font.pixelSize: 12
+                    }
+                  }
+
+                  // Today's range slider: min/max flank a track, a dot
+                  // marks where the current temp actually falls between
+                  // them -- replaces the old flat "Today" row with
+                  // something that actually shows the range, not just
+                  // states two numbers.
+                  Item {
+                    id: rangeSlider
+                    visible: detailCard.isWeatherCard
+                    width: parent.width
+                    height: 20
+                    readonly property real frac: {
+                      var lo = entry.todayMinC, hi = entry.todayMaxC
+                      return hi > lo ? Math.max(0, Math.min(1, (entry.tempRawC - lo) / (hi - lo))) : 0.5
+                    }
+
+                    Text {
+                      id: rangeMinLabel
+                      anchors.left: parent.left
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: detailCard.isWeatherCard ? Math.round(entry.todayMinC) + "°" : ""
+                      color: "#9a9aa5"
+                      font.pixelSize: 12
+                    }
+                    Text {
+                      id: rangeMaxLabel
+                      anchors.right: parent.right
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: detailCard.isWeatherCard ? Math.round(entry.todayMaxC) + "°" : ""
+                      color: "#9a9aa5"
+                      font.pixelSize: 12
+                    }
+                    Rectangle {
+                      anchors.left: rangeMinLabel.right
+                      anchors.leftMargin: 10
+                      anchors.right: rangeMaxLabel.left
+                      anchors.rightMargin: 10
+                      anchors.verticalCenter: parent.verticalCenter
+                      height: 4
+                      radius: 2
+                      color: "#45455a"
+                      Rectangle {
+                        width: 10
+                        height: 10
+                        radius: 5
+                        color: "#ffffff"
+                        anchors.verticalCenter: parent.verticalCenter
+                        x: parent.width * rangeSlider.frac - width / 2
+                      }
+                    }
+                  }
+
+                  // Humidity / wind / condition as pill chips instead of
+                  // stacked label:value rows -- reuses the same emoji-free
+                  // text approach as everything else here, just laid out
+                  // as badges rather than rows.
+                  Row {
+                    visible: detailCard.isWeatherCard
+                    spacing: 8
+
+                    Rectangle {
+                      radius: height / 2
+                      height: humidityChipText.implicitHeight + 10
+                      width: humidityChipText.implicitWidth + 20
+                      color: "transparent"
+                      border.color: "#45455a"
+                      border.width: 1
+                      Text {
+                        id: humidityChipText
+                        anchors.centerIn: parent
+                        text: detailCard.isWeatherCard ? (Math.round(entry.humidity) + "% humidity") : ""
+                        color: "#e6e6e6"
+                        font.pixelSize: 11
+                      }
+                    }
+                    Rectangle {
+                      radius: height / 2
+                      height: windChipText.implicitHeight + 10
+                      width: windChipText.implicitWidth + 20
+                      color: "transparent"
+                      border.color: "#45455a"
+                      border.width: 1
+                      Text {
+                        id: windChipText
+                        anchors.centerIn: parent
+                        text: detailCard.isWeatherCard ? (Math.round(entry.windKmph) + " km/h " + entry.windDir) : ""
+                        color: "#e6e6e6"
+                        font.pixelSize: 11
+                      }
+                    }
+                    Rectangle {
+                      radius: height / 2
+                      height: conditionChipText.implicitHeight + 10
+                      width: conditionChipText.implicitWidth + 20
+                      color: "transparent"
+                      border.color: "#45455a"
+                      border.width: 1
+                      Text {
+                        id: conditionChipText
+                        anchors.centerIn: parent
+                        text: detailCard.isWeatherCard ? entry.conditionText : ""
+                        color: "#e6e6e6"
+                        font.pixelSize: 11
+                      }
                     }
                   }
 
@@ -1078,103 +1251,98 @@ Item {
                     }
                   }
 
-                  // weather-only rows: current feels-like/humidity/wind,
-                  // plus a compact 2-day forecast strip underneath a thin
-                  // divider -- same wttr.in response the ring's own temp
-                  // comes from already carries all of this (see
-                  // parseForecast), so it's free.
+                  Rectangle {
+                    visible: detailCard.isWeatherCard && (entry.forecast || []).length > 0
+                    width: parent.width
+                    height: 1
+                    color: "#2a2a2a"
+                  }
+
+                  // Forecast as horizontal range bars on a shared scale
+                  // (today's low/high aren't part of this axis -- it's
+                  // just the 3 forecast days against each other) instead
+                  // of 3 side-by-side columns: a day whose bar starts
+                  // further right or ends further left immediately reads
+                  // as "warmer low" / "cooler high" relative to the
+                  // others, which 3 stacked numbers didn't really convey.
                   Column {
-                    visible: detailCard.isWeatherCard
+                    id: forecastRows
+                    // entry.forecast only exists on a weather entry --
+                    // every other card type's entry has no such field at
+                    // all (not even an empty array), and this Column is
+                    // present (if invisible) in every delegate, so a
+                    // bare entry.forecast.length blew up on every
+                    // non-weather ring the instant this file loaded.
+                    readonly property var fc: entry.forecast || []
+                    visible: detailCard.isWeatherCard && fc.length > 0
                     width: cardColumn.width
-                    spacing: 8
+                    spacing: 10
+                    readonly property real gMin: fc.length > 0
+                      ? Math.min.apply(null, fc.map(function(d) { return d.minC }))
+                      : 0
+                    readonly property real gMax: fc.length > 0
+                      ? Math.max.apply(null, fc.map(function(d) { return d.maxC }))
+                      : 1
+                    readonly property real gSpan: Math.max(1, gMax - gMin)
 
-                    Item {
-                      width: parent.width
-                      height: 16
-                      Text {
-                        anchors.left: parent.left
-                        text: "Feels like"
-                        color: "#cfcfcf"
-                        font.pixelSize: 11
-                      }
-                      Text {
-                        anchors.right: parent.right
-                        text: detailCard.isWeatherCard ? Math.round(entry.feelsLikeC) + "°" : ""
-                        color: "#f2f2f2"
-                        font.pixelSize: 11
-                      }
-                    }
+                    Repeater {
+                      model: forecastRows.fc
 
-                    Item {
-                      width: parent.width
-                      height: 16
-                      Text {
-                        anchors.left: parent.left
-                        text: "Humidity"
-                        color: "#cfcfcf"
-                        font.pixelSize: 11
-                      }
-                      Text {
-                        anchors.right: parent.right
-                        text: detailCard.isWeatherCard ? Math.round(entry.humidity) + "%" : ""
-                        color: "#f2f2f2"
-                        font.pixelSize: 11
-                      }
-                    }
+                      Item {
+                        width: forecastRows.width
+                        height: 20
 
-                    Item {
-                      width: parent.width
-                      height: 16
-                      Text {
-                        anchors.left: parent.left
-                        text: "Wind"
-                        color: "#cfcfcf"
-                        font.pixelSize: 11
-                      }
-                      Text {
-                        anchors.right: parent.right
-                        text: detailCard.isWeatherCard ? (Math.round(entry.windKmph) + " km/h " + entry.windDir) : ""
-                        color: "#f2f2f2"
-                        font.pixelSize: 11
-                      }
-                    }
+                        Text {
+                          id: rowDay
+                          anchors.left: parent.left
+                          anchors.verticalCenter: parent.verticalCenter
+                          width: 28
+                          text: modelData.dayLabel
+                          color: "#e6e6e6"
+                          font.pixelSize: 12
+                        }
+                        Text {
+                          id: rowIcon
+                          anchors.left: rowDay.right
+                          anchors.verticalCenter: parent.verticalCenter
+                          text: modelData.emoji
+                          font.family: "Noto Color Emoji"
+                          font.pixelSize: 15
+                        }
+                        Text {
+                          id: rowMin
+                          anchors.left: rowIcon.right
+                          anchors.leftMargin: 8
+                          anchors.verticalCenter: parent.verticalCenter
+                          width: 24
+                          text: Math.round(modelData.minC) + "°"
+                          color: "#9a9aa5"
+                          font.pixelSize: 12
+                        }
+                        Text {
+                          anchors.right: parent.right
+                          anchors.verticalCenter: parent.verticalCenter
+                          width: 28
+                          horizontalAlignment: Text.AlignRight
+                          text: Math.round(modelData.maxC) + "°"
+                          color: "#e6e6e6"
+                          font.pixelSize: 12
+                        }
+                        Item {
+                          id: rowBar
+                          anchors.left: rowMin.right
+                          anchors.leftMargin: 8
+                          anchors.right: parent.right
+                          anchors.rightMargin: 36
+                          anchors.verticalCenter: parent.verticalCenter
+                          height: 6
 
-                    Rectangle {
-                      visible: detailCard.isWeatherCard && entry.forecast.length > 0
-                      width: parent.width
-                      height: 1
-                      color: "#2a2a2a"
-                    }
-
-                    Row {
-                      visible: detailCard.isWeatherCard && entry.forecast.length > 0
-                      width: parent.width
-                      spacing: 8
-
-                      Repeater {
-                        model: detailCard.isWeatherCard ? entry.forecast : []
-
-                        Column {
-                          width: (cardColumn.width - 16) / 3
-                          spacing: 2
-                          Text {
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            text: modelData.dayLabel
-                            color: "#cfcfcf"
-                            font.pixelSize: 11
-                            font.bold: true
-                          }
-                          Text {
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            text: modelData.emoji
-                            font.family: "Noto Color Emoji"
-                            font.pixelSize: 20
-                          }
-                          Text {
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            text: modelData.maxC + "° / " + modelData.minC + "°"
-                            color: "#f2f2f2"
-                            font.pixelSize: 11
+                          Rectangle {
+                            x: rowBar.width * ((modelData.minC - forecastRows.gMin) / forecastRows.gSpan)
+                            width: Math.max(4, rowBar.width * ((modelData.maxC - modelData.minC) / forecastRows.gSpan))
+                            height: parent.height
+                            radius: height / 2
+                            color: "#8b7fd6"
                           }
                         }
                       }
