@@ -1,6 +1,7 @@
 # Notch settings. Edits apply live -- no restart needed.
 
-# Ring/pill size: small | medium | large
+# Open pill size: small | medium | large (only affects the open/hovered
+# state -- the collapsed idle strip stays a fixed size regardless)
 size = "small"
 
 # Which rings show, and in what order (top to bottom = declared order here).

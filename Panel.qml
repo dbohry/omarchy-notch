@@ -23,7 +23,8 @@ import Quickshell.Hyprland
 //   cpu = false           # current CPU load %
 //   memory = false        # current memory-used %
 //
-//   size = "medium"   # small | medium | large
+//   size = "medium"   # small | medium | large -- open pill only, the
+//                     # collapsed idle strip is a fixed size regardless
 //
 // Under [items], any other agent id omarchy.agents writes a usage record
 // for also works by that same id -- not just claude/codex/fireworks.
@@ -98,20 +99,20 @@ Item {
   property var records: ({})
 
   // "medium" is the size this plugin shipped with -- the numbers below are
-  // exactly its old fixed values. "small"/"large" scale everything ring-
-  // related by roughly -25%/+30%; position (topMargin/rightMargin) and the
-  // collapsed hover strip stay close to constant since those aren't really
-  // a "size" the user is choosing, just the edge trigger.
+  // exactly its old fixed values. "small"/"large" scale ring size, spacing,
+  // and font by roughly -25%/+30%. This only ever applies to the open
+  // pill; the collapsed hover strip (collapsedW/collapsedH below) is a
+  // fixed edge trigger, independent of the size setting on purpose.
   readonly property var sizePresets: ({
-    small:  { ringSize: 38, ringStroke: 3, rowGap: 10, padTop: 10, padBottom: 9,  collapsedW: 8,  collapsedH: 70,  percentFont: 9 },
-    medium: { ringSize: 50, ringStroke: 4, rowGap: 14, padTop: 14, padBottom: 12, collapsedW: 10, collapsedH: 90,  percentFont: 11 },
-    large:  { ringSize: 64, ringStroke: 5, rowGap: 18, padTop: 18, padBottom: 16, collapsedW: 12, collapsedH: 110, percentFont: 13 }
+    small:  { ringSize: 38, ringStroke: 3, rowGap: 10, padTop: 10, padBottom: 9,  percentFont: 9 },
+    medium: { ringSize: 50, ringStroke: 4, rowGap: 14, padTop: 14, padBottom: 12, percentFont: 11 },
+    large:  { ringSize: 64, ringStroke: 5, rowGap: 18, padTop: 18, padBottom: 16, percentFont: 13 }
   })
   property string sizeKey: "medium"
   readonly property var size: sizePresets[sizeKey] || sizePresets.medium
 
-  readonly property int collapsedW: size.collapsedW
-  readonly property int collapsedH: size.collapsedH
+  readonly property int collapsedW: 18
+  readonly property int collapsedH: 70
   readonly property int ringSize: size.ringSize
   readonly property int ringStroke: size.ringStroke
   readonly property int rowGap: size.rowGap
@@ -119,7 +120,12 @@ Item {
   readonly property int pillPadBottom: size.padBottom
   readonly property int expandedW: ringSize + 26
   readonly property int topMargin: 46
-  readonly property int rightMargin: 10
+  // 0, not some small inset: any nonzero margin here tends to land close to
+  // Hyprland's own gaps_out (10 by default), which makes the pill look like
+  // it's nesting against a maximized window's border decoration instead of
+  // the monitor's actual edge -- it should read as part of the screen,
+  // independent of whatever's tiled underneath it.
+  readonly property int rightMargin: 0
 
   readonly property var iconFor: ({ "claude": "claude.svg", "codex": "codex.svg", "fireworks": "fireworks.svg" })
   readonly property var colorFor: ({ "claude": "#e8622c", "codex": "#3ecf6e", "fireworks": "#e0c93e" })
@@ -448,17 +454,21 @@ Item {
 
     Rectangle {
       id: pill
-      radius: width / 2
       color: "#111111"
       anchors.top: parent.top
       anchors.right: parent.right
       anchors.topMargin: root.topMargin
       anchors.rightMargin: root.rightMargin
       visible: !root.fullscreenActive
-      // Collapse to zero size (not just hidden) while a window is fullscreen
-      // so the layer-shell mask leaves no hoverable/clickable region there.
+      // Same capsule shape collapsed and expanded, just a smaller version
+      // of it -- no separate decoration for the idle state.
       width: root.fullscreenActive ? 0 : (root.expanded ? root.expandedW : root.collapsedW)
       height: root.fullscreenActive ? 0 : (root.expanded ? (agentColumn.implicitHeight + root.pillPadTop + root.pillPadBottom) : root.collapsedH)
+      // Right side always flush with the monitor edge (no rounding gap);
+      // left side always rounded, capsule-style.
+      radius: width / 2
+      topRightRadius: 0
+      bottomRightRadius: 0
 
       Behavior on width { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
       Behavior on height { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
