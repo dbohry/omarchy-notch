@@ -5,42 +5,10 @@ import Quickshell.Io
 import Quickshell.Wayland
 import Quickshell.Hyprland
 
-// Hover-triggered edge notch. Collapsed: a small pill hugging the top-right
-// corner. Hovering it expands a vertical stack of ring meters -- one per AI
-// agent usage record already written by omarchy.agents' collectors, plus
-// optional weather / cpu / memory / download / upload rings.
-//
-// What renders is driven entirely by ~/.config/omarchy/plugins/notch/settings.toml
-// (a small hand-rolled TOML subset -- see applySettings below -- chosen to
-// match shell.toml/colors.toml elsewhere in Omarchy, and because it allows
-// real "#" comments where JSON doesn't):
-//
-//   [items]
-//   claude = true      # Claude usage %, if omarchy.agents has a record for it
-//   codex = false       # Codex usage %, if omarchy.agents has a record for it
-//   fireworks = false   # Fireworks usage %, if omarchy.agents has a record for it
-//   weather = true       # condition emoji + temperature; hover for
-//                        # feels-like/humidity/wind, today's high/low,
-//                        # and a 3-day forecast
-//   cpu = false           # current CPU load %; hover for clock speed,
-//                        # load average, and top processes by CPU use
-//   memory = false        # current memory-used %; hover for used/total
-//                        # (and swap, if configured)
-//   download = false      # current download rate
-//   upload = false        # current upload rate
-//
-//   size = "medium"   # small | medium | large -- open pill only, the
-//                     # collapsed idle strip is a fixed size regardless
-//
-// Under [items], any other agent id omarchy.agents writes a usage record
-// for also works by that same id -- not just claude/codex/fireworks.
-// `true` lines render, in the order they appear in the file; `false` or
-// missing lines don't. A ring with no matching data (an agent id with no
-// usage record yet) is silently skipped rather than erroring. A missing
-// file, or one with no [items] section, falls back to every known agent
-// plus weather/cpu/memory/download/upload so the notch still does
-// something useful out of the box. Edits hot-reload -- no restart needed
-// to see a settings.toml change.
+// Hover-triggered edge notch: a thin idle strip at the top-right corner
+// that expands into a column of rings on hover. Driven by settings.toml
+// (a hand-rolled TOML subset, see applySettings below) -- see README.md
+// for the full config format and what each ring type shows.
 Item {
   id: root
   visible: false
@@ -54,22 +22,15 @@ Item {
 
   property bool expanded: false
 
-  // Hyprland's own "fullscreen" flag only fires for a true xdg-shell
-  // fullscreen request -- a borderless-fullscreen game or browser video
-  // is just a plain window sized to the monitor, so that flag stays
-  // false. Comparing the active window's geometry to its monitor's
-  // resolution catches both cases. This matters beyond hiding the popup:
-  // any visible layer-shell surface here, even fully transparent, blocks
-  // Hyprland's direct-scanout path for whatever fullscreen client is
-  // under it, capping its framerate to the composited path.
+  // Hyprland's fullscreen flag misses borderless-fullscreen windows (a
+  // game/video sized to the monitor but not a real xdg-shell fullscreen
+  // request), so this also checks geometry. Matters beyond the popup:
+  // any visible layer-shell surface here blocks direct-scanout for
+  // whatever's fullscreen under it, capping its framerate.
   readonly property var activeToplevel: Hyprland.activeToplevel
   readonly property var activeMonitor: activeToplevel ? activeToplevel.monitor : null
-  // Percentage tolerance, not a fixed pixel count: Omarchy's default
-  // gaps_out (10) + border_size (2) inset a merely-maximized window a few
-  // px from the true monitor edges on every side, which a tight pixel
-  // tolerance missed entirely. 3% of a 3840x2160 monitor is ~115x65px --
-  // comfortably absorbs any reasonable gaps/border config while still
-  // excluding a normal, non-maximized window.
+  // Percentage tolerance, not fixed pixels: absorbs gaps_out/border_size
+  // insetting a maximized window from the true monitor edge.
   readonly property bool borderlessFullscreen: {
     if (!activeToplevel || !activeMonitor) return false
     var ipc = activeToplevel.lastIpcObject
@@ -85,12 +46,8 @@ Item {
   readonly property bool fullscreenActive: trueFullscreen || borderlessFullscreen
   onFullscreenActiveChanged: if (fullscreenActive) root.expanded = false
 
-  // Quickshell doesn't refresh a toplevel's cached geometry/fullscreen state
-  // for every Hyprland event -- going fullscreen on a window that was
-  // already focused (no focus change involved) left lastIpcObject and
-  // hasFullscreen stale, so the notch never disappeared for fullscreen
-  // video in an already-focused browser tab. Forcing a refresh on every
-  // raw IPC event closes that gap.
+  // Quickshell doesn't refresh cached toplevel state on every Hyprland
+  // event -- going fullscreen without a focus change left it stale.
   Connections {
     target: Hyprland
     function onRawEvent(event) {
@@ -102,11 +59,8 @@ Item {
   property var agentIds: []
   property var records: ({})
 
-  // "medium" is the size this plugin shipped with -- the numbers below are
-  // exactly its old fixed values. "small"/"large" scale ring size, spacing,
-  // and font by roughly -25%/+30%. This only ever applies to the open
-  // pill; the collapsed hover strip (collapsedW/collapsedH below) is a
-  // fixed edge trigger, independent of the size setting on purpose.
+  // Only the open pill scales with size; the collapsed strip below is a
+  // fixed edge trigger regardless.
   readonly property var sizePresets: ({
     small:  { ringSize: 38, ringStroke: 3, rowGap: 10, padTop: 10, padBottom: 9,  percentFont: 9 },
     medium: { ringSize: 50, ringStroke: 4, rowGap: 14, padTop: 14, padBottom: 12, percentFont: 11 },
@@ -123,15 +77,10 @@ Item {
   readonly property int pillPadTop: size.padTop
   readonly property int pillPadBottom: size.padBottom
   readonly property int expandedW: ringSize + 26
-  // Below the bar with enough clearance that the first ring's hover card
-  // (vertically centered on that ring, extending well above it) doesn't
-  // reach up into the bar -- not just clearing the pill itself.
+  // Clears not just the bar but the first ring's hover card above it.
   readonly property int topMargin: 90
-  // 0, not some small inset: any nonzero margin here tends to land close to
-  // Hyprland's own gaps_out (10 by default), which makes the pill look like
-  // it's nesting against a maximized window's border decoration instead of
-  // the monitor's actual edge -- it should read as part of the screen,
-  // independent of whatever's tiled underneath it.
+  // 0, not a small inset -- a nonzero value reads as nesting against a
+  // maximized window's border instead of the monitor's actual edge.
   readonly property int rightMargin: 0
 
   readonly property var iconFor: ({ "claude": "claude.svg", "codex": "codex.svg", "fireworks": "fireworks.svg" })
@@ -141,10 +90,6 @@ Item {
 
   // ------------------------------------------------------------ settings
 
-  // Every currently-known agent plus weather, cpu, memory, download, and
-  // upload -- used only when settings.toml is missing or has no [items]
-  // section, so the notch still does something useful before it's been
-  // configured.
   function defaultItems() {
     return root.agentIds.concat(["weather", "cpu", "memory", "download", "upload"])
   }
@@ -161,12 +106,8 @@ Item {
     onLoadFailed: root.configuredItems = root.defaultItems()
   }
 
-  // Same small hand-rolled TOML subset the shell itself uses for
-  // shell.toml/colors.toml (see Commons/Color.qml's parseShell): a
-  // "[section]" header, "key = value" pairs, "#" comments (full-line or
-  // trailing), no external parser dependency. Bare `true`/`false` under
-  // [items] toggles a ring on/off; encounter order in the file becomes
-  // render order.
+  // Same TOML subset shell.toml/colors.toml use elsewhere in Omarchy.
+  // Encounter order of `true` entries under [items] becomes render order.
   function applySettings(content) {
     var text = String(content || "")
     var items = []
@@ -187,10 +128,8 @@ Item {
         var boolKv = line.match(/^([A-Za-z0-9_-]+)\s*=\s*(true|false)\s*(#.*)?$/)
         if (boolKv && boolKv[2] === "true") items.push(boolKv[1])
       } else if (section === "") {
-        // A true top-level key, meaning it must appear before any
-        // "[section]" header -- TOML sections are sticky to end of file,
-        // so a "size = ..." line placed after [items] would silently be
-        // read as (and fail to match) an items entry instead.
+        // Must appear before any [section] -- TOML sections are sticky
+        // to end of file, so "size" after [items] would silently fail.
         var sizeKv = line.match(/^size\s*=\s*["']?([A-Za-z]+)["']?\s*(#.*)?$/)
         if (sizeKv) sizeValue = sizeKv[1]
       }
@@ -203,11 +142,8 @@ Item {
 
   readonly property var displayNameFor: ({ "claude": "Claude", "codex": "Codex", "fireworks": "Fireworks" })
 
-  // Never returns null/undefined -- always a well-formed object, even for
-  // an id with no usage record yet (available: false). Every ring
-  // delegate binds straight to this (see entryFor below), so a null
-  // would throw the moment a child binding dereferenced it, regardless
-  // of `visible: entry.available` hiding the delegate.
+  // Never returns null -- always a well-formed object, `available: false`
+  // for an id with no usage record yet. See entryFor for why that matters.
   function agentEntry(id) {
     var rec = root.records[id]
     if (!rec) {
@@ -238,35 +174,28 @@ Item {
       displayName: displayNameFor[id] || rec.name || id,
       percent: percent,
       known: known,
-      // Full limits list (session, weekly, ...) for the hover detail card
-      // -- the ring itself only ever shows the first one.
       limits: Array.isArray(rec.limits) ? rec.limits : [],
       icon: assetsDir + "/" + (iconFor[id] || (id + ".svg")),
       color: colorFor[id] || "#8a8a8a"
     }
   }
 
-  // Severity color for a limit's progress bar in the hover detail card --
-  // independent of the ring's own brand color, since "how close to the
-  // limit" is more useful here than which agent it is.
+  // Independent of the ring's own brand color -- how close to the limit
+  // matters more here than which agent it is.
   function severityColor(percent) {
     if (percent >= 0.9) return "#e05d5d"
     if (percent >= 0.6) return "#e0c93e"
     return "#3ecf6e"
   }
 
-  // Progressively darker shades of the cpu accent color for the top-3
-  // processes' bar segments and bullet dots -- rank 0 is the full color,
-  // each rank after that a bit darker, so "which segment is which row"
-  // is readable without needing 3 unrelated colors.
+  // Progressively darker shades of the cpu accent color, so segment and
+  // row stay visually paired without needing 3 unrelated colors.
   function cpuSegmentColor(rank) {
     if (rank === 0) return root.cpuColor
     if (rank === 1) return Qt.darker(root.cpuColor, 1.5)
     return Qt.darker(root.cpuColor, 2.2)
   }
 
-  // resetsAt comes through as an ISO datetime string (or "" when the
-  // agent doesn't report one, e.g. a session limit with no known reset).
   function formatResetTime(iso) {
     if (!iso) return ""
     var d = new Date(iso)
@@ -283,12 +212,10 @@ Item {
   property real weatherHumidity: NaN
   property real weatherWindKmph: NaN
   property string weatherWindDir: ""
-  // Today's high/low (daily.*[0] in the same Open-Meteo response the
-  // 3-day forecast comes from -- index 0 is today, just unused before).
+  // daily.*[0] in the same Open-Meteo response as the forecast (index 0).
   property real weatherTodayMaxC: NaN
   property real weatherTodayMinC: NaN
-  // Next 3 days (index 1-3; today is index 0, see above) -- each
-  // {dayLabel, emoji, maxC, minC}.
+  // Next 3 days: [{dayLabel, emoji, maxC, minC}, ...]
   property var weatherForecast: []
   property bool weatherReady: false
   property string weatherLocationQuery: ""
@@ -298,11 +225,9 @@ Item {
   readonly property bool weatherKnown: root.weatherReady && !isNaN(root.weatherTempC)
   readonly property bool weatherWanted: root.configuredItems.indexOf("weather") !== -1
 
-  // code is an Open-Meteo WMO weather code. isDay (current.is_day, 1/0)
-  // is only meaningful for the live ring/card icon -- forecast days call
-  // this without it (defaults true), since a whole day has no single
-  // day/night state. Only clear and partly-cloudy get a night variant;
-  // the rest read fine as the same icon either way.
+  // code is an Open-Meteo WMO weather code. isDay is only passed for the
+  // live icon; forecast days omit it (defaults true, no per-day night
+  // state). Only clear/partly-cloudy get a night variant.
   function weatherEmoji(code, isDay) {
     var c = parseInt(String(code || "0"), 10)
     var day = isDay === undefined || isDay
@@ -317,10 +242,6 @@ Item {
     return "⛅"
   }
 
-  // Short condition label for the chip badge -- same WMO code buckets as
-  // weatherEmoji, just text instead of a glyph. Not day/night-aware:
-  // "Clear" reads fine as a chip label regardless of whether the ring
-  // itself is showing a sun or a moon for it.
   function weatherConditionText(code) {
     var c = parseInt(String(code || "0"), 10)
     if (c === 0) return "Clear"
@@ -339,9 +260,8 @@ Item {
     return dirs[Math.round(deg / 22.5) % 16]
   }
 
-  // daily.time/weather_code/temperature_2m_max/min are parallel arrays,
-  // index 0 = today (the ring/card's already showing that), so this
-  // starts at 1 and takes the next 3.
+  // daily.* are parallel arrays; index 0 is today (shown elsewhere), so
+  // this starts at 1 and takes the next 3.
   function parseForecast(daily) {
     if (!daily || !Array.isArray(daily.time)) return []
     var out = []
@@ -379,10 +299,8 @@ Item {
     }
   }
 
-  // Reuses the location the built-in weather bar widget already has
-  // configured (same file it writes to) so there's no separate location
-  // picker to build here. A name-only entry (or no file at all) means
-  // IP auto-detect, same as that widget's own fallback.
+  // Reuses the location the built-in weather bar widget already writes --
+  // no separate picker here. Missing/name-only means IP auto-detect.
   FileView {
     id: weatherLocationFile
     path: home + "/.local/state/omarchy/settings/weather.json"
@@ -408,10 +326,8 @@ Item {
     }
   }
 
-  // Bootstraps lat/lon from wttr.in's own location resolution when
-  // weather.json has no coordinates configured (the common case for an
-  // auto-detected location) -- exactly what the bar widget does before
-  // its own Open-Meteo call, so the two resolve to the same place.
+  // Bootstraps lat/lon from wttr.in when weather.json has none configured
+  // -- same path the bar widget takes, so the two agree.
   Process {
     id: geoProcess
     command: ["curl", "-fsS", "--max-time", "5", "https://wttr.in/" + encodeURIComponent(root.weatherLocationQuery) + "?format=j1"]
@@ -499,11 +415,8 @@ Item {
   property real memAvailKb: 0
   property real swapTotalKb: 0
   property real swapFreeKb: 0
-  // Top CPU-consuming processes: [{name, percent}, ...], up to 3, plus
-  // cpuOtherPercent for everything not in that list. Same /proc/stat
-  // sampling window as cpuPercent, normalized the same way (against
-  // system-wide tick delta, not per-core), so top3 + other sums close to
-  // cpuPercent -- see notch-resource-stats.
+  // Top 3 processes plus cpuOtherPercent for the rest; normalized the
+  // same way as cpuPercent, so they sum close to it (see notch-resource-stats).
   property var cpuTopProcesses: []
   property real cpuOtherPercent: 0
   property bool resourcesReady: false
@@ -522,9 +435,6 @@ Item {
     }
   }
 
-  // cpu carries a couple of extra fields (clock speed, load average) for
-  // its hover detail card -- everything /proc and /sys already track, no
-  // lm-sensors or other extra package (see notch-resource-stats).
   function cpuEntry() {
     var e = root.resourceEntry("cpu", "CPU", root.cpuPercent, root.cpuColor)
     e.freqMhz = root.cpuFreqMhz
@@ -536,9 +446,6 @@ Item {
     return e
   }
 
-  // memory carries used/total (and swap, if any is configured) for its
-  // hover detail card -- same /proc/meminfo read the ring's percent
-  // already comes from, just a couple more fields out of it.
   function memoryEntry() {
     var e = root.resourceEntry("memory", "MEM", root.memPercent, root.memoryColor)
     e.usedGb = (root.memTotalKb - root.memAvailKb) / 1048576
@@ -549,8 +456,6 @@ Item {
     return e
   }
 
-  // 0.3s /proc/stat sample window lives in the script, not here, so this
-  // stays a normal async Process instead of blocking the shell.
   Process {
     id: resourceProcess
     command: [root.pluginDir + "/bin/notch-resource-stats"]
@@ -636,8 +541,6 @@ Item {
   function downloadEntry() { return root.networkEntry("download", "↓", root.networkRxRate, root.downloadColor) }
   function uploadEntry() { return root.networkEntry("upload", "↑", root.networkTxRate, root.uploadColor) }
 
-  // 0.5s /proc/net/dev sample window lives in the script, not here, so
-  // this stays a normal async Process instead of blocking the shell.
   Process {
     id: networkProcess
     command: [root.pluginDir + "/bin/notch-network-stats"]
@@ -668,21 +571,12 @@ Item {
 
   // ------------------------------------------------------- combined model
 
-  // Resolves one configuredItems key ("weather", "cpu", "memory",
-  // "download", "upload", or a specific agent id) to its ring data.
-  // Always a well-formed object (see agentEntry) -- `.available` says
-  // whether there's real data to show yet.
-  //
-  // The ring Repeater below binds its model directly to configuredItems,
-  // not to a per-poll list of resolved entries, so that array stays the
-  // same object across a data refresh -- it only changes when
-  // settings.toml's [items] changes. Each delegate calls this itself for
-  // its own live data instead. That split matters: Repeater tears down
-  // and recreates every delegate whenever the array *reference* it's
-  // bound to changes, even to an equivalent array -- which a fresh
-  // `out.push(...)` array on every cpu/mem poll (every 3s) was doing,
-  // destroying and rebuilding every ring's HoverHandler mid-hover and
-  // closing any open card the instant its value updated.
+  // Resolves one configuredItems key to its ring data. The Repeater below
+  // binds to configuredItems itself (not a per-poll list of resolved
+  // entries), and each delegate calls this for its own live data --
+  // Repeater recreates every delegate when the model *array reference*
+  // changes, even to an equivalent array, which was destroying every
+  // ring's HoverHandler (closing any open card) on every data poll.
   function entryFor(key) {
     if (key === "weather") return root.weatherEntry()
     if (key === "cpu") return root.cpuEntry()
@@ -747,12 +641,8 @@ Item {
 
   PanelWindow {
     id: panel
-    // Withdraw the layer-shell surface entirely during fullscreen -- not
-    // just the pill's hit region -- so Hyprland has nothing else to
-    // composite over the fullscreen client and can keep direct scanout
-    // (the path that gets a fullscreen game to full refresh rate). Any
-    // visible surface here, even fully transparent, forces the compositor
-    // onto the slower composited path for the whole output.
+    // Whole surface withdrawn during fullscreen, not just the pill hidden
+    // -- see fullscreenActive above for why.
     visible: !root.fullscreenActive
     anchors { top: true; right: true; bottom: true; left: true }
     color: "transparent"
@@ -761,8 +651,7 @@ Item {
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
     exclusionMode: ExclusionMode.Ignore
 
-    // Only the pill's bounding box accepts pointer input; everything else
-    // in this full-height transparent window passes clicks through.
+    // Only the pill accepts pointer input; the rest passes clicks through.
     mask: Region {
       item: pill
     }
@@ -775,13 +664,9 @@ Item {
       anchors.topMargin: root.topMargin
       anchors.rightMargin: root.rightMargin
       visible: !root.fullscreenActive
-      // Same capsule shape collapsed and expanded, just a smaller version
-      // of it -- no separate decoration for the idle state.
       width: root.fullscreenActive ? 0 : (root.expanded ? root.expandedW : root.collapsedW)
       height: root.fullscreenActive ? 0 : (root.expanded ? (agentColumn.implicitHeight + root.pillPadTop + root.pillPadBottom) : root.collapsedH)
-      // Right side always flush with the monitor edge (no rounding gap);
-      // left side always rounded, capsule-style.
-      radius: width / 2
+      radius: width / 2  // right side stays flush with the edge, see below
       topRightRadius: 0
       bottomRightRadius: 0
 
@@ -834,8 +719,6 @@ Item {
                   }
                 }
               }
-              // Agents and cpu/memory both have a real percent to fill;
-              // weather doesn't, so its ring stays a static outline.
               Shape {
                 visible: entry.type === "agent" || entry.type === "resource"
                 anchors.fill: parent
@@ -854,10 +737,6 @@ Item {
                   }
                 }
               }
-              // Same layout for all three: an icon centered in the ring, a
-              // value below it. Agents get their brand mark and a percent;
-              // cpu/memory get a short text label and a percent; weather
-              // gets a condition emoji and the temperature.
               Image {
                 visible: entry.type === "agent"
                 source: entry.type === "agent" ? ("file://" + entry.icon) : ""
@@ -866,13 +745,9 @@ Item {
                 anchors.centerIn: parent
                 fillMode: Image.PreserveAspectFit
               }
-              // Weather has no svg mark, so its "icon" is the condition
-              // emoji, sized to roughly match the agent icons' footprint.
-              // font.family is pinned explicitly: fontconfig's default
-              // match for some of these codepoints (clear-sky "☀" in
-              // particular) resolves to a plain UI font instead of the
-              // emoji font, rendering a monochrome fallback glyph rather
-              // than the actual icon.
+              // font.family pinned: fontconfig's default match for some of
+              // these codepoints (clear-sky "☀") resolves to a plain UI
+              // font instead of the emoji font.
               Text {
                 visible: entry.type === "weather"
                 anchors.centerIn: parent
@@ -880,8 +755,6 @@ Item {
                 font.family: "Noto Color Emoji"
                 font.pixelSize: root.ringSize * 0.42
               }
-              // cpu/memory have no icon either, just a short label ("CPU" /
-              // "MEM") smaller than the emoji so three-plus letters fit.
               Text {
                 visible: entry.type === "resource"
                 anchors.centerIn: parent
@@ -890,8 +763,6 @@ Item {
                 font.pixelSize: root.ringSize * 0.24
                 font.bold: true
               }
-              // download/upload: a single arrow, sized more like the
-              // weather emoji than the 3-letter resource labels.
               Text {
                 visible: entry.type === "network"
                 anchors.centerIn: parent
@@ -901,23 +772,16 @@ Item {
                 font.bold: true
               }
 
-              // Separate from the pill-level HoverHandler that drives
-              // expand/collapse -- this one only tracks this specific
-              // ring, to show its detail card without affecting the rest.
+              // Separate from the pill-level HoverHandler -- this one only
+              // tracks this ring, for its own detail card.
               HoverHandler {
                 id: ringHover
                 enabled: entry.type === "agent" || entry.id === "cpu" || entry.id === "memory" || entry.type === "weather"
               }
 
-              // Detail card: for an agent ring, session + weekly usage with
-              // reset times; for cpu, clock speed and load average; for
-              // memory, used/total (and swap, if any is configured); for
-              // weather, feels-like/humidity/wind plus a short forecast.
-              // Positioned to the left of the ring -- rendering isn't
-              // clipped to parent bounds, so it's free to extend past
-              // ringBox's own small footprint. Purely informational (no
-              // controls), so it doesn't need to be part of the
-              // layer-shell input mask.
+              // Positioned left of the ring; not clipped to ringBox's
+              // bounds, and not part of the input mask (purely
+              // informational, no controls).
               Rectangle {
                 id: detailCard
                 readonly property bool isAgentCard: entry.type === "agent" && entry.limits.length > 0
@@ -940,11 +804,7 @@ Item {
                   spacing: 10
 
                   Row {
-                    // Weather and cpu each have their own hero line doing
-                    // this job instead (icon+temp / big % reads as "this
-                    // is weather/CPU" on its own) -- a second title label
-                    // above it would be redundant, unlike the other card
-                    // types which have no such hero.
+                    // weather/cpu have their own hero line instead
                     visible: !detailCard.isWeatherCard && !detailCard.isCpuCard
                     spacing: 8
                     Image {
@@ -968,10 +828,6 @@ Item {
                     }
                   }
 
-                  // Weather hero: big icon + big current temp on the
-                  // left, "feels X°" pinned top-right -- the card's
-                  // actual focal point, replacing what used to be just
-                  // another small gray text row.
                   Item {
                     visible: detailCard.isWeatherCard
                     width: parent.width
@@ -1001,11 +857,6 @@ Item {
                     }
                   }
 
-                  // Today's range slider: min/max flank a track, a dot
-                  // marks where the current temp actually falls between
-                  // them -- replaces the old flat "Today" row with
-                  // something that actually shows the range, not just
-                  // states two numbers.
                   Item {
                     id: rangeSlider
                     visible: detailCard.isWeatherCard
@@ -1052,10 +903,6 @@ Item {
                     }
                   }
 
-                  // Humidity / wind / condition as pill chips instead of
-                  // stacked label:value rows -- reuses the same emoji-free
-                  // text approach as everything else here, just laid out
-                  // as badges rather than rows.
                   Row {
                     visible: detailCard.isWeatherCard
                     spacing: 8
@@ -1152,10 +999,6 @@ Item {
                     }
                   }
 
-                  // cpu hero: big "% / CPU in use" on the left, clock
-                  // speed + load average stacked top-right -- same
-                  // /proc reads as before, just laid out as a focal
-                  // point instead of two label:value rows.
                   Item {
                     visible: detailCard.isCpuCard
                     width: parent.width
@@ -1196,11 +1039,6 @@ Item {
                     }
                   }
 
-                  // Segmented usage bar: the "used" portion of the track
-                  // (width = overall cpu%) is split into shaded segments
-                  // for each top process plus "everything else", so the
-                  // bar itself previews the breakdown the rows below spell
-                  // out in full.
                   Item {
                     visible: detailCard.isCpuCard
                     width: parent.width
@@ -1239,9 +1077,7 @@ Item {
                     }
                   }
 
-                  // Process list: colored dot matching the bar segment's
-                  // shade, name (the kernel's own truncated comm, up to
-                  // 15 chars -- no prettier-name lookup exists), percent.
+                  // name is the kernel's own truncated comm (15 chars max)
                   Column {
                     visible: detailCard.isCpuCard
                     width: parent.width
@@ -1308,12 +1144,6 @@ Item {
                     }
                   }
 
-                  // memory-only rows: used/total, plus swap used/total
-                  // when the machine actually has swap configured (a
-                  // swapless system reports SwapTotal: 0, so that row
-                  // just doesn't show rather than displaying "0.00 / 0.00
-                  // GB"). Same /proc/meminfo read the ring's percent
-                  // already comes from.
                   Column {
                     visible: detailCard.isMemoryCard
                     width: cardColumn.width
@@ -1387,18 +1217,10 @@ Item {
                     color: "#2a2a2a"
                   }
 
-                  // Forecast as horizontal range bars on a shared scale
-                  // (today's low/high aren't part of this axis -- it's
-                  // just the 3 forecast days against each other) instead
-                  // of 3 side-by-side columns: a day whose bar starts
-                  // further right or ends further left immediately reads
-                  // as "warmer low" / "cooler high" relative to the
-                  // others, which 3 stacked numbers didn't really convey.
                   Column {
                     id: forecastRows
-                    // entry.forecast only exists on a weather entry; this
-                    // Column exists (if invisible) in every ring's card,
-                    // so the fallback keeps non-weather entries safe.
+                    // entry.forecast only exists on weather entries; this
+                    // Column exists in every ring's card, hence the fallback.
                     readonly property var fc: entry.forecast || []
                     visible: detailCard.isWeatherCard && fc.length > 0
                     width: cardColumn.width
@@ -1476,13 +1298,9 @@ Item {
                   }
                 }
 
-                // Speech-bubble tail: a small square, same color as the
-                // card, centered on the card's own right edge and
-                // rotated 45°. Half sits under the card (invisible, same
-                // color), half pokes out as a diamond corner reading as
-                // a pointer. Must be a child of detailCard (not a
-                // sibling) so "parent" below resolves to the card, not
-                // the ring.
+                // Rotated square centered on the card's edge: half hidden
+                // under the card, half pokes out as a pointer. Must stay
+                // a child of detailCard so "parent" resolves to the card.
                 Rectangle {
                   width: 16
                   height: 16
