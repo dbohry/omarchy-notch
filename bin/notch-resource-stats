@@ -14,6 +14,11 @@
 # one "__OTHER__\t<pct>" line for everything not in the top 3. <name> is
 # the kernel's own truncated comm (max 15 chars) -- there's no lookup
 # table for prettier names the way macOS's Activity Monitor has one.
+#
+# Then a "---MEM---" separator, then the same shape again but for the
+# top RSS-consuming processes: each process's share of total sampled RSS
+# scaled onto mem_pct, so top3 + __OTHER__ sum close to mem_pct the same
+# way the cpu list sums close to cpu_pct.
 
 # /proc/<pid>/stat's 2nd field is "(comm)" and comm itself can contain
 # spaces or even parens, so position-based field splitting doesn't work
@@ -106,5 +111,31 @@ if (( totald > 0 )); then
   other_delta=$(( total_delta - top_delta ))
   if (( other_delta > 0 )); then
     awk -v d="$other_delta" -v t="$totald" 'BEGIN { printf "__OTHER__\t%.1f\n", (100*d/t) }'
+  fi
+fi
+
+echo "---MEM---"
+
+mem_used_kb=$(( mem_total - mem_avail ))
+awk '
+  FNR == 1 { pid = ""; name = ""; rss = 0; split(FILENAME, pp, "/"); pid = pp[3] }
+  /^Name:/  { name = $0; sub(/^Name:[ \t]*/, "", name) }
+  /^VmRSS:/ { rss = $2 }
+  ENDFILE { if (rss > 0) print pid "\t" name "\t" rss }
+' /proc/[0-9]*/status 2>/dev/null | sort -t $'\t' -k3,3rn > "$sample_dir/mem_ranked"
+
+if (( mem_used_kb > 0 )) && [[ -s "$sample_dir/mem_ranked" ]]; then
+  total_rss=$(awk -F'\t' '{s+=$3} END{print s+0}' "$sample_dir/mem_ranked")
+  if (( total_rss > 0 )); then
+    top_rss=$(head -n 3 "$sample_dir/mem_ranked" | awk -F'\t' '{s+=$3} END{print s+0}')
+    head -n 3 "$sample_dir/mem_ranked" | while IFS=$'\t' read -r pid name rss; do
+      awk -v n="$name" -v r="$rss" -v t="$total_rss" -v u="$mem_used_kb" -v mt="$mem_total" \
+        'BEGIN { printf "%s\t%.1f\n", n, (r/t)*(100*u/mt) }'
+    done
+    other_rss=$(( total_rss - top_rss ))
+    if (( other_rss > 0 )); then
+      awk -v r="$other_rss" -v t="$total_rss" -v u="$mem_used_kb" -v mt="$mem_total" \
+        'BEGIN { printf "__OTHER__\t%.1f\n", (r/t)*(100*u/mt) }'
+    fi
   fi
 fi

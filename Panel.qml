@@ -196,6 +196,12 @@ Item {
     return Qt.darker(root.cpuColor, 2.2)
   }
 
+  function memSegmentColor(rank) {
+    if (rank === 0) return root.memoryColor
+    if (rank === 1) return Qt.darker(root.memoryColor, 1.5)
+    return Qt.darker(root.memoryColor, 2.2)
+  }
+
   function formatResetTime(iso) {
     if (!iso) return ""
     var d = new Date(iso)
@@ -452,6 +458,8 @@ Item {
   // same way as cpuPercent, so they sum close to it (see notch-resource-stats).
   property var cpuTopProcesses: []
   property real cpuOtherPercent: 0
+  property var memTopProcesses: []
+  property real memOtherPercent: 0
   property bool resourcesReady: false
 
   readonly property bool resourcesWanted: root.configuredItems.indexOf("cpu") !== -1 || root.configuredItems.indexOf("memory") !== -1
@@ -486,6 +494,8 @@ Item {
     e.swapUsedGb = (root.swapTotalKb - root.swapFreeKb) / 1048576
     e.swapTotalGb = root.swapTotalKb / 1048576
     e.swapPercent = root.swapTotalKb > 0 ? (root.swapTotalKb - root.swapFreeKb) / root.swapTotalKb : 0
+    e.topProcesses = root.memTopProcesses
+    e.otherPercent = root.memOtherPercent
     return e
   }
 
@@ -512,12 +522,22 @@ Item {
 
           var top = []
           var other = 0
+          var memTop = []
+          var memOther = 0
+          var inMem = false
           for (var i = 1; i < lines.length; i++) {
             var line = lines[i]
             if (!line) continue
+            if (line === "---MEM---") { inMem = true; continue }
             var fields = line.split("\t")
             if (fields.length !== 2) continue
-            if (fields[0] === "__OTHER__") {
+            if (inMem) {
+              if (fields[0] === "__OTHER__") {
+                memOther = parseFloat(fields[1]) || 0
+              } else {
+                memTop.push({ name: fields[0], percent: parseFloat(fields[1]) || 0 })
+              }
+            } else if (fields[0] === "__OTHER__") {
               other = parseFloat(fields[1]) || 0
             } else {
               top.push({ name: fields[0], percent: parseFloat(fields[1]) || 0 })
@@ -525,6 +545,8 @@ Item {
           }
           root.cpuTopProcesses = top
           root.cpuOtherPercent = other
+          root.memTopProcesses = memTop
+          root.memOtherPercent = memOther
         }
       }
     }
@@ -822,7 +844,7 @@ Item {
                 readonly property bool isMemoryCard: entry.id === "memory"
                 readonly property bool isWeatherCard: entry.type === "weather" && entry.known
                 visible: ringHover.hovered && (isAgentCard || isCpuCard || isMemoryCard || isWeatherCard)
-                width: isWeatherCard ? 280 : isCpuCard ? 240 : 220
+                width: isWeatherCard ? 280 : (isCpuCard || isMemoryCard) ? 240 : 220
                 height: cardColumn.implicitHeight + 24
                 radius: 10
                 color: pill.color
@@ -1239,6 +1261,110 @@ Item {
                         height: parent.height
                         radius: 3
                         color: root.severityColor(entry.swapPercent || 0)
+                      }
+                    }
+
+                    Item {
+                      visible: detailCard.isMemoryCard
+                      width: parent.width
+                      height: 8
+
+                      Rectangle {
+                        anchors.fill: parent
+                        radius: height / 2
+                        color: "#333333"
+                      }
+                      Row {
+                        id: memSegRow
+                        height: parent.height
+                        width: parent.width * (detailCard.isMemoryCard ? Math.max(0, Math.min(1, entry.percent)) : 0)
+                        readonly property real usedSum: {
+                          if (!detailCard.isMemoryCard) return 0
+                          var s = entry.otherPercent
+                          for (var i = 0; i < entry.topProcesses.length; i++) s += entry.topProcesses[i].percent
+                          return s
+                        }
+
+                        Repeater {
+                          model: detailCard.isMemoryCard ? entry.topProcesses : []
+                          Rectangle {
+                            width: memSegRow.usedSum > 0 ? memSegRow.width * (modelData.percent / memSegRow.usedSum) : 0
+                            height: memSegRow.height
+                            color: root.memSegmentColor(index)
+                          }
+                        }
+                        Rectangle {
+                          visible: detailCard.isMemoryCard && entry.otherPercent > 0
+                          width: memSegRow.usedSum > 0 ? memSegRow.width * (entry.otherPercent / memSegRow.usedSum) : 0
+                          height: memSegRow.height
+                          color: "#555555"
+                        }
+                      }
+                    }
+
+                    Column {
+                      visible: detailCard.isMemoryCard
+                      width: parent.width
+                      spacing: 6
+
+                      Repeater {
+                        model: detailCard.isMemoryCard ? entry.topProcesses : []
+                        Item {
+                          width: parent.width
+                          height: 16
+                          Rectangle {
+                            width: 8
+                            height: 8
+                            radius: 2
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            color: root.memSegmentColor(index)
+                          }
+                          Text {
+                            anchors.left: parent.left
+                            anchors.leftMargin: 14
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: modelData.name
+                            color: "#e6e6e6"
+                            font.pixelSize: 11
+                          }
+                          Text {
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: modelData.percent.toFixed(1) + "%"
+                            color: "#e6e6e6"
+                            font.pixelSize: 11
+                          }
+                        }
+                      }
+
+                      Item {
+                        visible: detailCard.isMemoryCard && entry.otherPercent > 0
+                        width: parent.width
+                        height: 16
+                        Rectangle {
+                          width: 8
+                          height: 8
+                          radius: 2
+                          anchors.left: parent.left
+                          anchors.verticalCenter: parent.verticalCenter
+                          color: "#555555"
+                        }
+                        Text {
+                          anchors.left: parent.left
+                          anchors.leftMargin: 14
+                          anchors.verticalCenter: parent.verticalCenter
+                          text: "Everything else"
+                          color: "#9a9a9a"
+                          font.pixelSize: 11
+                        }
+                        Text {
+                          anchors.right: parent.right
+                          anchors.verticalCenter: parent.verticalCenter
+                          text: detailCard.isMemoryCard ? entry.otherPercent.toFixed(1) + "%" : ""
+                          color: "#9a9a9a"
+                          font.pixelSize: 11
+                        }
                       }
                     }
                   }
