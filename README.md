@@ -4,6 +4,10 @@ Omarchy shell panel. Hover-triggered pill, top-right corner. Collapsed = thin
 idle strip. Hover = column of rings (AI agent usage, weather, CPU, memory,
 download/upload), each with detail card on hover. Auto-hides on fullscreen.
 
+<!-- <img width="188" height="563" alt="screenshot-2026-08-30_23-20-43" src="https://github.com/user-attachments/assets/b3ffbe0b-53d2-4dc2-af06-9f43fd63cdbf" /> -->
+<img width="582" height="484" alt="screenshot-2026-08-30_23-21-10" src="https://github.com/user-attachments/assets/ddceb691-44eb-43d7-8037-76c3e7e51c09" />
+
+
 ## Install
 
 ```bash
