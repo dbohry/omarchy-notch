@@ -22,7 +22,8 @@ import Quickshell.Hyprland
 //   weather = true       # condition emoji + temperature; hover for
 //                        # feels-like/humidity/wind and a 3-day forecast
 //   cpu = false           # current CPU load %
-//   memory = false        # current memory-used %
+//   memory = false        # current memory-used %; hover for used/total
+//                        # (and swap, if configured)
 //   download = false      # current download rate
 //   upload = false        # current upload rate
 //
@@ -468,6 +469,10 @@ Item {
   property real load1: 0
   property real load5: 0
   property real load15: 0
+  property real memTotalKb: 0
+  property real memAvailKb: 0
+  property real swapTotalKb: 0
+  property real swapFreeKb: 0
   property bool resourcesReady: false
 
   readonly property bool resourcesWanted: root.configuredItems.indexOf("cpu") !== -1 || root.configuredItems.indexOf("memory") !== -1
@@ -495,7 +500,18 @@ Item {
     e.load15 = root.load15
     return e
   }
-  function memoryEntry() { return root.resourceEntry("memory", "MEM", root.memPercent, root.memoryColor) }
+  // memory carries used/total (and swap, if any is configured) for its
+  // hover detail card -- same /proc/meminfo read the ring's percent
+  // already comes from, just a couple more fields out of it.
+  function memoryEntry() {
+    var e = root.resourceEntry("memory", "MEM", root.memPercent, root.memoryColor)
+    e.usedGb = (root.memTotalKb - root.memAvailKb) / 1048576
+    e.totalGb = root.memTotalKb / 1048576
+    e.swapUsedGb = (root.swapTotalKb - root.swapFreeKb) / 1048576
+    e.swapTotalGb = root.swapTotalKb / 1048576
+    e.swapPercent = root.swapTotalKb > 0 ? (root.swapTotalKb - root.swapFreeKb) / root.swapTotalKb : 0
+    return e
+  }
 
   // 0.3s /proc/stat sample window lives in the script, not here, so this
   // stays a normal async Process instead of blocking the shell.
@@ -506,13 +522,17 @@ Item {
       waitForEnd: true
       onStreamFinished: {
         var parts = String(text || "").trim().split(/\s+/)
-        if (parts.length === 6) {
+        if (parts.length === 10) {
           root.cpuPercent = parseFloat(parts[0]) || 0
           root.memPercent = parseFloat(parts[1]) || 0
           root.load1 = parseFloat(parts[2]) || 0
           root.load5 = parseFloat(parts[3]) || 0
           root.load15 = parseFloat(parts[4]) || 0
           root.cpuFreqMhz = parseFloat(parts[5]) || 0
+          root.memTotalKb = parseFloat(parts[6]) || 0
+          root.memAvailKb = parseFloat(parts[7]) || 0
+          root.swapTotalKb = parseFloat(parts[8]) || 0
+          root.swapFreeKb = parseFloat(parts[9]) || 0
           root.resourcesReady = true
         }
       }
@@ -840,23 +860,25 @@ Item {
               // ring, to show its detail card without affecting the rest.
               HoverHandler {
                 id: ringHover
-                enabled: entry.type === "agent" || entry.id === "cpu" || entry.type === "weather"
+                enabled: entry.type === "agent" || entry.id === "cpu" || entry.id === "memory" || entry.type === "weather"
               }
 
               // Detail card: for an agent ring, session + weekly usage with
-              // reset times; for the cpu ring, clock speed and load
-              // average; for weather, feels-like/humidity/wind plus a
-              // short forecast. Positioned to the left of the ring --
-              // rendering isn't clipped to parent bounds, so it's free to
-              // extend past ringBox's own small footprint. Purely
-              // informational (no controls), so it doesn't need to be
-              // part of the layer-shell input mask.
+              // reset times; for cpu, clock speed and load average; for
+              // memory, used/total (and swap, if any is configured); for
+              // weather, feels-like/humidity/wind plus a short forecast.
+              // Positioned to the left of the ring -- rendering isn't
+              // clipped to parent bounds, so it's free to extend past
+              // ringBox's own small footprint. Purely informational (no
+              // controls), so it doesn't need to be part of the
+              // layer-shell input mask.
               Rectangle {
                 id: detailCard
                 readonly property bool isAgentCard: entry.type === "agent" && entry.limits.length > 0
                 readonly property bool isCpuCard: entry.id === "cpu"
+                readonly property bool isMemoryCard: entry.id === "memory"
                 readonly property bool isWeatherCard: entry.type === "weather" && entry.known
-                visible: ringHover.hovered && (isAgentCard || isCpuCard || isWeatherCard)
+                visible: ringHover.hovered && (isAgentCard || isCpuCard || isMemoryCard || isWeatherCard)
                 width: isWeatherCard ? 260 : 220
                 height: cardColumn.implicitHeight + 24
                 radius: 10
@@ -884,6 +906,7 @@ Item {
                     Text {
                       text: entry.type === "agent" ? (entry.displayName + " Usage")
                         : detailCard.isCpuCard ? "CPU"
+                        : detailCard.isMemoryCard ? "Memory"
                         : detailCard.isWeatherCard ? "Weather"
                         : ""
                       color: "#f2f2f2"
@@ -979,6 +1002,78 @@ Item {
                           : ""
                         color: "#f2f2f2"
                         font.pixelSize: 11
+                      }
+                    }
+                  }
+
+                  // memory-only rows: used/total, plus swap used/total
+                  // when the machine actually has swap configured (a
+                  // swapless system reports SwapTotal: 0, so that row
+                  // just doesn't show rather than displaying "0.00 / 0.00
+                  // GB"). Same /proc/meminfo read the ring's percent
+                  // already comes from.
+                  Column {
+                    visible: detailCard.isMemoryCard
+                    width: cardColumn.width
+                    spacing: 8
+
+                    Item {
+                      width: parent.width
+                      height: 16
+                      Text {
+                        anchors.left: parent.left
+                        text: "Used"
+                        color: "#cfcfcf"
+                        font.pixelSize: 11
+                      }
+                      Text {
+                        anchors.right: parent.right
+                        text: detailCard.isMemoryCard ? (entry.usedGb.toFixed(1) + " / " + entry.totalGb.toFixed(1) + " GB") : ""
+                        color: "#f2f2f2"
+                        font.pixelSize: 11
+                      }
+                    }
+                    Rectangle {
+                      width: parent.width
+                      height: 6
+                      radius: 3
+                      color: "#333333"
+                      Rectangle {
+                        width: parent.width * Math.max(0, Math.min(1, entry.percent || 0))
+                        height: parent.height
+                        radius: 3
+                        color: root.severityColor(entry.percent || 0)
+                      }
+                    }
+
+                    Item {
+                      width: parent.width
+                      height: 16
+                      visible: detailCard.isMemoryCard && entry.swapTotalGb > 0.05
+                      Text {
+                        anchors.left: parent.left
+                        text: "Swap used"
+                        color: "#cfcfcf"
+                        font.pixelSize: 11
+                      }
+                      Text {
+                        anchors.right: parent.right
+                        text: detailCard.isMemoryCard ? (entry.swapUsedGb.toFixed(1) + " / " + entry.swapTotalGb.toFixed(1) + " GB") : ""
+                        color: "#f2f2f2"
+                        font.pixelSize: 11
+                      }
+                    }
+                    Rectangle {
+                      visible: detailCard.isMemoryCard && entry.swapTotalGb > 0.05
+                      width: parent.width
+                      height: 6
+                      radius: 3
+                      color: "#333333"
+                      Rectangle {
+                        width: parent.width * Math.max(0, Math.min(1, entry.swapPercent || 0))
+                        height: parent.height
+                        radius: 3
+                        color: root.severityColor(entry.swapPercent || 0)
                       }
                     }
                   }
