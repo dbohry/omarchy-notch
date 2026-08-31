@@ -958,8 +958,9 @@ Item {
                     }
                   }
 
-                  Row {
+                  Flow {
                     visible: detailCard.isWeatherCard
+                    width: cardColumn.width
                     spacing: 8
 
                     Rectangle {
