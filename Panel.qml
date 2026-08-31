@@ -556,6 +556,25 @@ Item {
     if (!resourceProcess.running) resourceProcess.running = true
   }
 
+  // RAM speed is fixed for the boot, so this fires once (not on the 3s
+  // poll) and only when the memory card is actually configured. inxi is
+  // an optional package -- notch-resource-stats deliberately avoids extra
+  // deps, so a missing binary just leaves the label blank.
+  property string memSpeedLabel: ""
+
+  Process {
+    id: memSpeedProcess
+    running: root.configuredItems.indexOf("memory") !== -1
+    command: ["inxi", "-m", "-c0"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var m = String(text || "").match(/speed:\s*([0-9]+)\s*MT\/s/i)
+        root.memSpeedLabel = m ? (m[1] + " MT/s") : ""
+      }
+    }
+  }
+
   Timer {
     interval: 3000
     running: root.resourcesWanted
@@ -860,8 +879,8 @@ Item {
                   spacing: 10
 
                   Row {
-                    // weather/cpu have their own hero line instead
-                    visible: !detailCard.isWeatherCard && !detailCard.isCpuCard
+                    // weather/cpu/memory have their own hero line instead
+                    visible: !detailCard.isWeatherCard && !detailCard.isCpuCard && !detailCard.isMemoryCard
                     spacing: 8
                     Image {
                       visible: entry.type === "agent"
@@ -1201,6 +1220,35 @@ Item {
                     }
                   }
 
+                  Item {
+                    visible: detailCard.isMemoryCard
+                    width: parent.width
+                    height: 40
+                    Column {
+                      anchors.left: parent.left
+                      anchors.bottom: parent.bottom
+                      spacing: 0
+                      Text {
+                        text: detailCard.isMemoryCard ? Math.round(entry.percent * 100) + "%" : ""
+                        color: "#f2f2f2"
+                        font.pixelSize: 30
+                        font.bold: true
+                      }
+                      Text {
+                        text: "Memory in use"
+                        color: "#8a8a8a"
+                        font.pixelSize: 11
+                      }
+                    }
+                    Text {
+                      anchors.right: parent.right
+                      anchors.top: parent.top
+                      text: detailCard.isMemoryCard ? root.memSpeedLabel : ""
+                      color: "#9a9aa5"
+                      font.pixelSize: 11
+                    }
+                  }
+
                   Column {
                     visible: detailCard.isMemoryCard
                     width: cardColumn.width
@@ -1209,6 +1257,7 @@ Item {
                     Item {
                       width: parent.width
                       height: 16
+                      visible: detailCard.isMemoryCard
                       Text {
                         anchors.left: parent.left
                         text: "Used"
@@ -1223,6 +1272,7 @@ Item {
                       }
                     }
                     Rectangle {
+                      visible: detailCard.isMemoryCard
                       width: parent.width
                       height: 6
                       radius: 3
