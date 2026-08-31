@@ -848,6 +848,7 @@ Item {
                 height: cardColumn.implicitHeight + 24
                 radius: 10
                 color: pill.color
+                clip: true
                 anchors.right: parent.left
                 anchors.rightMargin: 26
                 anchors.verticalCenter: parent.verticalCenter
