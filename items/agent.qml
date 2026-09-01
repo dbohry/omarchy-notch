@@ -1,51 +1,47 @@
 import QtQuick
-import Quickshell
 import Quickshell.Io
 
-// Fallback for any configured id with no matching items/*.qml file --
-// one instance per agent id, each watching its own usage record.
+// Fallback for any configured id with no matching items/*.qml file -- one
+// instance per agent id, each watching its own usage record.
 Item {
   id: root
   visible: false
 
   property string itemId: ""
+  property var host: null
 
-  readonly property string home: Quickshell.env("HOME") || ""
-  readonly property string usageDir: (Quickshell.env("XDG_STATE_HOME") || home + "/.local/state") + "/omarchy/agents/usage"
   readonly property string assetsDir: "/usr/share/omarchy/shell/plugins/agents/assets"
-
-  readonly property var iconFor: ({ "claude": "claude.svg", "codex": "codex.svg", "fireworks": "fireworks.svg" })
-  readonly property var colorFor: ({ "claude": "#e8622c", "codex": "#3ecf6e", "fireworks": "#e0c93e" })
-  readonly property var displayNameFor: ({ "claude": "Claude", "codex": "Codex", "fireworks": "Fireworks" })
+  // Everything not listed here still works: the icon falls back to
+  // <id>.svg, the color to grey, the name to whatever the record says.
+  readonly property var known_agents: ({
+    claude:    { icon: "claude.svg",    color: "#e8622c", name: "Claude" },
+    codex:     { icon: "codex.svg",     color: "#3ecf6e", name: "Codex" },
+    fireworks: { icon: "fireworks.svg", color: "#e0c93e", name: "Fireworks" }
+  })
+  readonly property var meta: root.known_agents[root.itemId] || ({})
 
   property var record: null
 
   readonly property bool available: root.record !== null
-  readonly property string agentName: (root.record && root.record.name) || root.itemId
-  readonly property string displayName: root.displayNameFor[root.itemId] || root.agentName
   readonly property var limits: (root.record && Array.isArray(root.record.limits)) ? root.record.limits : []
+  readonly property string displayName: root.meta.name || (root.record && root.record.name) || root.itemId
+  readonly property string icon: root.assetsDir + "/" + (root.meta.icon || (root.itemId + ".svg"))
+
   readonly property real percent: root.limits.length > 0 ? Math.max(0, Math.min(1, root.limits[0].percent || 0)) : 0
   readonly property bool known: root.limits.length > 0
   readonly property bool showArc: true
-  readonly property color ringColor: root.colorFor[root.itemId] || "#8a8a8a"
-  readonly property string icon: root.assetsDir + "/" + (root.iconFor[root.itemId] || (root.itemId + ".svg"))
+  readonly property color ringColor: root.meta.color || "#8a8a8a"
   readonly property string bottomLabel: root.known ? (Math.round(root.percent * 100) + "%") : "--"
 
-  function severityColor(pct) {
-    if (pct >= 0.9) return "#e05d5d"
-    if (pct >= 0.6) return "#e0c93e"
-    return "#3ecf6e"
-  }
-
-  function formatResetTime(iso) {
+  function resetLabel(iso) {
     if (!iso) return ""
     var d = new Date(iso)
     if (isNaN(d.getTime())) return ""
-    return Qt.formatDateTime(d, "ddd h:mm AP")
+    return "Resets " + Qt.formatDateTime(d, "ddd h:mm AP")
   }
 
   FileView {
-    path: root.itemId ? (root.usageDir + "/" + root.itemId + ".json") : ""
+    path: (root.host && root.itemId) ? (root.host.usageDir + "/" + root.itemId + ".json") : ""
     watchChanges: true
     printErrors: false
     onFileChanged: reload()
@@ -72,7 +68,10 @@ Item {
 
   readonly property int cardWidth: 220
 
-  readonly property Component cardComponentImpl: Component {
+  // No card until there's something to put in it.
+  readonly property Component cardContent: root.limits.length > 0 ? root.usageCard : null
+
+  readonly property Component usageCard: Component {
     Column {
       id: cardColumn
       width: parent.width
@@ -101,49 +100,14 @@ Item {
       Repeater {
         model: root.limits.slice(0, 2)
 
-        Column {
+        LabeledBar {
           width: cardColumn.width
-          spacing: 4
-
-          Item {
-            width: parent.width
-            height: 16
-            Text {
-              anchors.left: parent.left
-              text: modelData.label || ""
-              color: theme.textSecondary
-              font.pixelSize: 11
-            }
-            Text {
-              anchors.right: parent.right
-              text: root.formatResetTime(modelData.resetsAt) ? ("Resets " + root.formatResetTime(modelData.resetsAt)) : ""
-              color: theme.textMuted
-              font.pixelSize: 10
-            }
-          }
-
-          Rectangle {
-            width: parent.width
-            height: 6
-            radius: 3
-            color: theme.trackBg
-            Rectangle {
-              width: parent.width * Math.max(0, Math.min(1, modelData.percent || 0))
-              height: parent.height
-              radius: 3
-              color: root.severityColor(modelData.percent || 0)
-            }
-          }
-
-          Text {
-            text: Math.round((modelData.percent || 0) * 100) + "% Used"
-            color: theme.textSecondary
-            font.pixelSize: 11
-          }
+          label: modelData.label || ""
+          detail: root.resetLabel(modelData.resetsAt)
+          fraction: Math.max(0, Math.min(1, modelData.percent || 0))
+          footer: Math.round((modelData.percent || 0) * 100) + "% Used"
         }
       }
     }
   }
-
-  readonly property Component cardContent: root.limits.length > 0 ? root.cardComponentImpl : null
 }
