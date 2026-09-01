@@ -54,6 +54,10 @@ one instance per id listed in `settings.toml [items]`, falling back to
 `items/agent.qml` for any id that doesn't match a file (that's how arbitrary
 agent ids work with zero registration).
 
+Item ids are lowercase. Files in `items/` starting with anything else
+(`Theme.qml`, `ProcBreakdown.qml`, `_template.qml`, ...) are shared building
+blocks, not items, and are skipped by discovery.
+
 To add your own:
 
 1. Copy `items/_template.qml` to `items/<your-id>.qml`.
@@ -66,6 +70,7 @@ The host reads these properties off your item (all optional except
 | Property | Type | Default | Meaning |
 |---|---|---|---|
 | `itemId` | string | set by host | matches your `[items]` key |
+| `host` | var | set by host | the `Panel.qml` root — see below |
 | `available` | bool | `true` | `false` hides the ring entirely |
 | `percent` | real | `0` | 0..1, drives the progress arc |
 | `known` | bool | `false` | arc stays flat until true |
@@ -77,17 +82,46 @@ The host reads these properties off your item (all optional except
 | `cardWidth` | int | `220` | detail card width |
 
 Your item owns its own data fetching (`Process`, `Timer`, `FileView`, …) —
-see `items/weather.qml` or `items/cpu.qml` for real examples. `items/Theme.qml`
-has shared colors (`Theme { id: theme }`, then `theme.textPrimary` etc.) if
-you want to match the built-in look.
+see `items/weather.qml` for a real example.
+
+`host` is the `Panel.qml` root, for the few things worth sharing:
+
+| | |
+|---|---|
+| `host.pluginDir` | this plugin's directory, for `bin/` helpers |
+| `host.usageDir` | `omarchy.agents` usage records |
+| `host.expanded` | true while the pill is open |
+| `host.sysStats` | shared CPU/memory poll (`items/SysStats.qml`) |
+| `host.netStats` | shared network poll (`items/NetStats.qml`) |
+
+The two pollers run one process per tick no matter how many items read them,
+tick slowly while the pill is closed, and stay idle until something
+subscribes — so an item that reads one must say so:
+
+```qml
+Component.onCompleted: host.sysStats.users++
+Component.onDestruction: host.sysStats.users--
+```
+
+`items/` also has ready-made pieces you can drop into a card (no import
+needed, they are same-directory types):
+
+| | |
+|---|---|
+| `Theme` | colors + `severityColor()` / `rankColor()` (`Theme { id: theme }`) |
+| `CardHeader` | card title plus the big number / caption row |
+| `LabeledBar` | labelled progress bar with optional detail and footer |
+| `ProcBreakdown` | stacked "top 3 processes + everything else" bar and legend |
+| `Retry` | a give-up-after-N-tries timer for flaky fetches |
+| `NetRate` | the whole download/upload ring, minus direction and color |
 
 ## Data sources
 
 - `~/.local/state/omarchy/agents/usage/*.json` — from `omarchy.agents` (`items/agent.qml`)
 - [wttr.in](https://wttr.in) — location bootstrap (`items/weather.qml`)
 - [Open-Meteo](https://open-meteo.com) — weather/forecast (`items/weather.qml`)
-- `/proc/stat`, `/proc/meminfo`, `/proc/loadavg` — `bin/notch-resource-stats`, polled independently by `items/cpu.qml` and `items/memory.qml`
-- `/proc/net/dev` — `bin/notch-network-stats`, polled independently by `items/download.qml` and `items/upload.qml`
+- `/proc/stat`, `/proc/meminfo`, `/proc/loadavg` — `bin/notch-resource-stats`, polled once by `items/SysStats.qml` for both `cpu` and `memory`
+- `/proc/net/dev` — `bin/notch-network-stats`, polled once by `items/NetStats.qml` for both `download` and `upload`
 
 ## Requirements
 

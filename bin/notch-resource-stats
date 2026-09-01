@@ -1,31 +1,12 @@
 #!/bin/bash
-# First line: "<cpu_pct> <mem_pct> <load1> <load5> <load15> <freq_mhz>
-# <mem_total_kb> <mem_avail_kb> <swap_total_kb> <swap_free_kb>", using a
-# short /proc/stat sample window for cpu_pct. Everything else there is a
-# single read of a file the kernel already maintains -- no lm-sensors or
-# other extra package, which is why there's no temperature: that needs a
-# sensor that isn't guaranteed to exist or to be the CPU package on every
-# machine. Self-contained (no dependency on the separate sysmon plugin) so
-# the notch still works if that plugin is ever disabled or removed.
-#
-# Then up to 4 more lines, "<name>\t<pct>", the top CPU-consuming
-# processes (by the same /proc/stat-window sampling as cpu_pct, so their
-# percentages are on the same scale and sum close to cpu_pct) followed by
-# one "__OTHER__\t<pct>" line for everything not in the top 3. <name> is
-# the kernel's own truncated comm (max 15 chars) -- there's no lookup
-# table for prettier names the way macOS's Activity Monitor has one.
-#
-# Then a "---MEM---" separator, then the same shape again but for the
-# top RSS-consuming processes: each process's share of total sampled RSS
-# scaled onto mem_pct, so top3 + __OTHER__ sum close to mem_pct the same
-# way the cpu list sums close to cpu_pct.
+# Output contract (see items/SysStats.qml):
+# Line 1: "<cpu_pct> <mem_pct> <load1> <load5> <load15> <freq_mhz>
+# <mem_total_kb> <mem_avail_kb> <swap_total_kb> <swap_free_kb>"
+# Then up to 4 lines "<name>\t<pct>" (top CPU processes + one __OTHER__),
+# a "---MEM---" separator, then the same shape for top RSS processes.
 
-# /proc/<pid>/stat's 2nd field is "(comm)" and comm itself can contain
-# spaces or even parens, so position-based field splitting doesn't work
-# directly -- this splits on ")" and keeps only the LAST piece, which is
-# always what comes after comm regardless of what's inside it. From
-# there, state is that piece's field 1, so utime/stime (originally
-# fields 14/15) land at 12/13.
+# comm in /proc/<pid>/stat can contain spaces/parens, so this splits on
+# ")" and keeps the last piece -- always what follows comm.
 proc_snapshot() {
   awk '
   {
@@ -86,11 +67,8 @@ fi
 
 echo "$cpu $mem $load1 $load5 $load15 ${freq_mhz:-0} ${mem_total:-0} ${mem_avail:-0} ${swap_total:-0} ${swap_free:-0}"
 
-# Per-process delta, normalized against the SAME totald as cpu_pct above
-# (not against a single core) -- that's what makes top3 + "everything
-# else" sum back to close to cpu_pct, the way macOS's Activity Monitor
-# does it, instead of top/htop's per-core-normalized convention where
-# processes can individually read over 100%.
+# Normalized against totald (not a single core), so top3 + __OTHER__ sum
+# close to cpu_pct -- unlike top/htop where a process can read over 100%.
 if (( totald > 0 )); then
   awk -F'\t' '
     NR == FNR { t1[$1] = $3; next }

@@ -1,42 +1,34 @@
 import QtQuick
 
-// Copy this file to items/<your-id>.qml (no leading underscore -- files
-// starting with "_" are ignored by discovery) and add `<your-id> = true`
-// under [items] in settings.toml. No changes to Panel.qml needed.
-//
-// The host loads exactly one instance of this file per configured id that
-// doesn't match a more specific items/*.qml file, sets `itemId`, and reads
-// the properties below. Everything else (background ring circle, hover
-// wiring, card chrome/position, pill expand/collapse) is drawn by the host.
+// Copy to items/<your-id>.qml (lowercase first letter) and add
+// `<your-id> = true` under [items] in settings.toml. No Panel.qml edits
+// needed. The host sets `itemId`/`host` and reads the properties below;
+// everything else (ring circle, hover, card chrome) is drawn by the host.
 Item {
   id: root
   visible: false
 
-  // Set by the host after load. Matches the key used in
-  // settings.toml [items] -- e.g. "weather", or an id the host didn't
-  // recognize as a built-in file (falls back to items/agent.qml).
+  // Set by the host: itemId matches the settings.toml [items] key. host is
+  // the Panel.qml root -- host.pluginDir, host.usageDir, host.expanded,
+  // and the shared pollers host.sysStats / host.netStats (items/SysStats.qml,
+  // items/NetStats.qml), which only run while subscribed:
+  //   Component.onCompleted: host.sysStats.users++
+  //   Component.onDestruction: host.sysStats.users--
   property string itemId: ""
+  property var host: null
 
-  // false hides the ring entirely (e.g. no data yet).
-  property bool available: true
+  // Read by the host. false hides the ring entirely.
+  readonly property bool available: true
 
-  // 0..1. Only matters if showArc is true.
-  property real percent: 0
-  // Arc stays flat at 0 sweep until this is true (e.g. "no data yet").
-  property bool known: false
-  // Most items draw their own ring content (see ringContent below) and
-  // leave the host's progress arc off. Set true to get the arc (like
-  // cpu/memory/agent).
-  property bool showArc: false
+  readonly property real percent: 0  // 0..1, only matters if showArc
+  readonly property bool known: false  // arc stays flat until true
+  readonly property bool showArc: false  // false: draw your own ringContent
   readonly property color ringColor: "#8a8a8a"
 
-  // Small text under the ring, e.g. "72%" or "3°" or "1.2M/s".
-  readonly property string bottomLabel: root.itemId
+  readonly property string bottomLabel: root.itemId  // e.g. "72%", "3°"
 
-  // Drawn inside the ring circle (ringSize x ringSize, set by the host).
-  // The root element of this Component must size itself relative to its
-  // own parent (anchors.fill: parent, then fractions of width/height) --
-  // it has no access to Panel.qml's properties.
+  // Must size itself relative to its own parent (ringSize x ringSize) --
+  // no access to Panel.qml's properties.
   readonly property Component ringContent: Component {
     Item {
       anchors.fill: parent
@@ -50,9 +42,10 @@ Item {
     }
   }
 
-  // Hover detail card body. Return null (the default) for no card at all.
-  // Width comes from cardWidth; height is this Component's implicitHeight
-  // + 24. Include your own title/header row -- the host draws no title.
+  // Hover detail card body; null = no card. Include your own title row --
+  // the host draws no chrome. items/ has ready-made pieces to drop in
+  // (same-directory types, no import needed): Theme, CardHeader, LabeledBar,
+  // ProcBreakdown.
   readonly property Component cardContent: null
   readonly property int cardWidth: 220
 }
