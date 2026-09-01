@@ -1,14 +1,14 @@
 import QtQuick
 
 // Copy to items/<your-id>.qml (lowercase first letter) and add
-// `<your-id> = true` under [items] in settings.toml. No Panel.qml edits
+// `<your-id> = true` under [items] in ~/.config/notch/settings.toml. No Panel.qml edits
 // needed. The host sets `itemId`/`host` and reads the properties below;
 // everything else (ring circle, hover, card chrome) is drawn by the host.
 Item {
   id: root
   visible: false
 
-  // Set by the host: itemId matches the settings.toml [items] key. host is
+  // Set by the host: itemId matches the [items] key in settings. host is
   // the Panel.qml root -- host.pluginDir, host.usageDir, host.expanded,
   // and the shared pollers host.sysStats / host.netStats (items/SysStats.qml,
   // items/NetStats.qml), which only run while subscribed:

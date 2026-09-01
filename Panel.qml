@@ -13,8 +13,12 @@ Item {
 
   readonly property string home: Quickshell.env("HOME") || ""
   readonly property string usageDir: (Quickshell.env("XDG_STATE_HOME") || home + "/.local/state") + "/omarchy/agents/usage"
-  readonly property string pluginDir: (Quickshell.env("XDG_CONFIG_HOME") || home + "/.config") + "/omarchy/plugins/notch"
+  readonly property string configHome: Quickshell.env("XDG_CONFIG_HOME") || home + "/.config"
+  readonly property string pluginDir: configHome + "/omarchy/plugins/notch"
   readonly property string itemsDir: pluginDir + "/items"
+  // User overrides live outside pluginDir so a plugin update (git pull /
+  // reinstall) never clobbers or conflicts with them.
+  readonly property string userSettingsPath: configHome + "/notch/settings.toml"
 
   property bool expanded: false
 
@@ -86,14 +90,38 @@ Item {
   readonly property var defaultItems: ["claude", "weather", "cpu", "memory"]
   property var configuredItems: defaultItems
 
+  // Bundled defaults, shipped + versioned with the plugin.
+  property string defaultsContent: ""
+  property bool defaultsLoaded: false
+  property bool userSettingsMissing: false
+
+  FileView {
+    id: defaultsFile
+    path: root.pluginDir + "/settings.default.toml"
+    printErrors: false
+    onLoaded: {
+      root.defaultsContent = text()
+      root.defaultsLoaded = true
+      if (root.userSettingsMissing) root.applySettings(root.defaultsContent)
+    }
+  }
+
+  // User overrides, outside pluginDir -- see userSettingsPath. Falls back to
+  // the bundled defaults above when absent.
   FileView {
     id: settingsFile
-    path: root.pluginDir + "/settings.toml"
+    path: root.userSettingsPath
     watchChanges: true
     printErrors: false
     onFileChanged: reload()
-    onLoaded: root.applySettings(text())
-    onLoadFailed: root.configuredItems = root.defaultItems
+    onLoaded: {
+      root.userSettingsMissing = false
+      root.applySettings(text())
+    }
+    onLoadFailed: {
+      root.userSettingsMissing = true
+      root.applySettings(root.defaultsLoaded ? root.defaultsContent : "")
+    }
   }
 
   // Encounter order of `true` entries under [items] becomes render order.
