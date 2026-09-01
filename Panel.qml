@@ -16,8 +16,7 @@ Item {
   readonly property string configHome: Quickshell.env("XDG_CONFIG_HOME") || home + "/.config"
   readonly property string pluginDir: configHome + "/omarchy/plugins/notch"
   readonly property string itemsDir: pluginDir + "/items"
-  // User overrides live outside pluginDir so a plugin update (git pull /
-  // reinstall) never clobbers or conflicts with them.
+  // Outside pluginDir so a plugin update (git pull / reinstall) never touches it.
   readonly property string userSettingsPath: configHome + "/notch/settings.toml"
 
   property bool expanded: false
@@ -56,7 +55,7 @@ Item {
   }
   readonly property bool trueFullscreen: Hyprland.focusedWorkspace !== null && Hyprland.focusedWorkspace.hasFullscreen
   readonly property bool fullscreenActive: trueFullscreen || borderlessFullscreen
-  onFullscreenActiveChanged: if (fullscreenActive) root.expanded = false
+  onFullscreenActiveChanged: if (fullscreenActive) { root.expanded = false; root.configOpen = false }
 
   // Quickshell doesn't refresh cached toplevel state on its own; only
   // refresh on events that can change geometry/fullscreen state.
@@ -88,9 +87,9 @@ Item {
   readonly property int rightMargin: 0  // nonzero reads as nested, not flush
 
   readonly property var defaultItems: ["claude", "weather", "cpu", "memory"]
-  property var configuredItems: defaultItems
+  property var allItems: []
+  readonly property var configuredItems: root.allItems.filter(function(it) { return it.enabled }).map(function(it) { return it.id })
 
-  // Bundled defaults, shipped + versioned with the plugin.
   property string defaultsContent: ""
   property bool defaultsLoaded: false
   property bool userSettingsMissing: false
@@ -106,8 +105,6 @@ Item {
     }
   }
 
-  // User overrides, outside pluginDir -- see userSettingsPath. Falls back to
-  // the bundled defaults above when absent.
   FileView {
     id: settingsFile
     path: root.userSettingsPath
@@ -124,7 +121,6 @@ Item {
     }
   }
 
-  // Encounter order of `true` entries under [items] becomes render order.
   function applySettings(content) {
     var items = []
     var sizeValue = ""
@@ -142,20 +138,105 @@ Item {
       }
       if (section === "items") {
         var boolKv = line.match(/^([A-Za-z0-9_-]+)\s*=\s*(true|false)\s*(#.*)?$/)
-        if (boolKv && boolKv[2] === "true") items.push(boolKv[1])
+        if (boolKv) items.push({ id: boolKv[1], enabled: boolKv[2] === "true" })
       } else if (section === "") {
         // size= must appear before any [section] -- TOML sections are sticky.
         var sizeKv = line.match(/^size\s*=\s*["']?([A-Za-z]+)["']?\s*(#.*)?$/)
         if (sizeKv) sizeValue = sizeKv[1]
       }
     }
-    root.configuredItems = sawItemsSection ? items : root.defaultItems
+    root.allItems = sawItemsSection ? items : root.defaultItems.map(function(id) { return { id: id, enabled: true } })
     root.sizeKey = root.sizePresets.hasOwnProperty(sizeValue) ? sizeValue : "medium"
+    root.mergeDiscoveredItems()
+  }
+
+  function mergeDiscoveredItems() {
+    if (!root.itemTypesReady) return
+    var known = {}
+    for (var i = 0; i < root.allItems.length; i++) known[root.allItems[i].id] = true
+    var extra = []
+    var ids = Object.keys(root.itemTypePaths)
+    for (var j = 0; j < ids.length; j++) {
+      // "agent" is the fallback template, not a selectable item on its own.
+      if (ids[j] === "agent" || known[ids[j]]) continue
+      extra.push({ id: ids[j], enabled: false })
+    }
+    if (extra.length > 0) root.allItems = root.allItems.concat(extra)
+  }
+
+  property bool configOpen: false
+  // pillHover.hovered doesn't change when configOpen toggles on its own
+  // (e.g. clicking the gear while already hovering), so re-derive here too.
+  onConfigOpenChanged: root.expanded = (pillHover.hovered || root.configOpen) && !root.fullscreenActive
+  property string pendingSettingsText: ""
+
+  // Trigger line is the rings' bottom edge, not pill.height -- that also
+  // changes when revealed, and anchoring the trigger to it would flicker.
+  readonly property real gearRevealZone: 34
+  readonly property real contentBottom: root.size.padTop + itemColumn.implicitHeight
+  readonly property bool gearNearBottom: pillHover.hovered && pillHover.point.position.y > (root.contentBottom - root.gearRevealZone)
+  readonly property bool gearRevealed: root.gearNearBottom || root.configOpen
+
+  function toggleItem(id) {
+    root.allItems = root.allItems.map(function(it) {
+      return it.id === id ? { id: it.id, enabled: !it.enabled } : it
+    })
+    root.persistSettings()
+  }
+
+  function moveItem(id, delta) {
+    var idx = -1
+    for (var i = 0; i < root.allItems.length; i++) if (root.allItems[i].id === id) { idx = i; break }
+    var swapIdx = idx + delta
+    if (idx < 0 || swapIdx < 0 || swapIdx >= root.allItems.length) return
+    var copy = root.allItems.slice()
+    var tmp = copy[idx]
+    copy[idx] = copy[swapIdx]
+    copy[swapIdx] = tmp
+    root.allItems = copy
+    root.persistSettings()
+  }
+
+  function setSizeKey(key) {
+    if (!root.sizePresets.hasOwnProperty(key)) return
+    root.sizeKey = key
+    root.persistSettings()
+  }
+
+  function persistSettings() {
+    var lines = ["size = \"" + root.sizeKey + "\"", "", "[items]"]
+    for (var i = 0; i < root.allItems.length; i++) {
+      lines.push(root.allItems[i].id + " = " + (root.allItems[i].enabled ? "true" : "false"))
+    }
+    var text = lines.join("\n") + "\n"
+    if (root.userSettingsMissing) {
+      // First write: the file (and maybe ~/.config/notch itself) doesn't
+      // exist yet -- make sure the directory is there before writing.
+      root.pendingSettingsText = text
+      mkdirProcess.running = true
+    } else {
+      root.writeSettingsText(text)
+    }
+  }
+
+  function writeSettingsText(text) {
+    settingsFile.setText(text)
+    root.userSettingsMissing = false
+    // Apply immediately rather than waiting on the file-watch round trip --
+    // that watch has proven unreliable for this path.
+    root.applySettings(text)
+  }
+
+  Process {
+    id: mkdirProcess
+    command: ["mkdir", "-p", root.configHome + "/notch"]
+    onExited: root.writeSettingsText(root.pendingSettingsText)
   }
 
   // id -> absolute file:// url. Unmatched ids fall back to items/agent.qml.
   property var itemTypePaths: ({})
   property bool itemTypesReady: false
+  onItemTypesReadyChanged: root.mergeDiscoveredItems()
 
   Process {
     running: true
@@ -192,8 +273,11 @@ Item {
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
     exclusionMode: ExclusionMode.Ignore
 
+    // Unlike the hover-only detail cards below, the popover needs real
+    // clicks -- collapses to 0x0 when closed, so it's a no-op mask then.
     mask: Region {
-      item: pill
+      Region { item: pill }
+      Region { item: settingsPanel.popover }
     }
 
     Rectangle {
@@ -204,7 +288,9 @@ Item {
       anchors.topMargin: root.topMargin
       anchors.rightMargin: root.rightMargin
       width: root.expanded ? root.expandedW : root.collapsedW
-      height: root.expanded ? (itemColumn.implicitHeight + root.size.padTop + root.size.padBottom) : root.collapsedH
+      height: root.expanded
+        ? (root.contentBottom + root.size.padBottom + (root.gearRevealed ? (root.size.rowGap + settingsPanel.glyphSize) : 0))
+        : root.collapsedH
       radius: width / 2  // right side stays flush with the screen edge
       topRightRadius: 0
       bottomRightRadius: 0
@@ -213,8 +299,11 @@ Item {
       Behavior on height { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
 
       HoverHandler {
+        id: pillHover
         enabled: !root.fullscreenActive
-        onHoveredChanged: root.expanded = hovered && !root.fullscreenActive
+        // Stay expanded while the settings popover is open, even once the
+        // pointer leaves the pill for the popover (outside pill's bounds).
+        onHoveredChanged: root.expanded = (hovered || root.configOpen) && !root.fullscreenActive
       }
 
       Column {
@@ -314,6 +403,17 @@ Item {
             }
           }
         }
+      }
+
+      // Sibling of itemColumn, not a child -- pill.height above only
+      // reserves its slot while revealed, so resizing the pill is the slide.
+      SettingsPanel {
+        id: settingsPanel
+        visible: root.expanded
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: root.size.padBottom
+        host: root
       }
     }
   }

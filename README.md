@@ -26,15 +26,16 @@ rm -rf ~/.config/omarchy/plugins/notch
 
 ## Configuration
 
+Hover the pill, click the gear icon at the bottom of the ring column: toggle
+items on/off, reorder them with ▲/▼, pick a size. Applies immediately, no
+restart.
+
+Advanced/scripted setup — hand-edit the TOML instead:
+
 ```bash
 mkdir -p ~/.config/notch
 cp ~/.config/omarchy/plugins/notch/settings.default.toml ~/.config/notch/settings.toml
 ```
-
-Edit `~/.config/notch/settings.toml`, then run `omarchy restart shell` to
-apply the change. Living outside the plugin dir means a `git pull` /
-reinstall never touches or conflicts with your settings. If the file is
-absent, the bundled defaults apply.
 
 ```toml
 size = "small"   # small | medium | large
@@ -51,7 +52,12 @@ upload = false
 ```
 
 `items` = which rings show + order. Any agent id with a usage record under
-`omarchy.agents` works, not just claude/codex/fireworks.
+`omarchy.agents` works, not just claude/codex/fireworks. Edit
+`~/.config/notch/settings.toml` by hand and run `omarchy restart shell` to
+pick it up (the gear popover applies its own edits live; hand edits to the
+file don't reload on their own). Living outside the plugin dir means a
+`git pull` / reinstall never touches or conflicts with your settings. If the
+file is absent, the bundled defaults apply.
 
 ## Data sources
 
