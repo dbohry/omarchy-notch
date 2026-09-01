@@ -45,13 +45,49 @@ upload = false
 `items` = which rings show + order. Any agent id with a usage record under
 `omarchy.agents` works, not just claude/codex/fireworks.
 
+## Writing an item
+
+Every ring type — weather, cpu, memory, download, upload, agent usage — is a
+self-contained file under `items/`. `Panel.qml` itself has no idea what a
+"weather" or "cpu" is; it just discovers `items/*.qml` at startup and loads
+one instance per id listed in `settings.toml [items]`, falling back to
+`items/agent.qml` for any id that doesn't match a file (that's how arbitrary
+agent ids work with zero registration).
+
+To add your own:
+
+1. Copy `items/_template.qml` to `items/<your-id>.qml`.
+2. Add `<your-id> = true` under `[items]` in `settings.toml`.
+3. Reload the plugin. No edits to `Panel.qml` needed.
+
+The host reads these properties off your item (all optional except
+`ringContent`, defaults shown):
+
+| Property | Type | Default | Meaning |
+|---|---|---|---|
+| `itemId` | string | set by host | matches your `[items]` key |
+| `available` | bool | `true` | `false` hides the ring entirely |
+| `percent` | real | `0` | 0..1, drives the progress arc |
+| `known` | bool | `false` | arc stays flat until true |
+| `showArc` | bool | `false` | opt into the host-drawn progress arc |
+| `ringColor` | color | `"#8a8a8a"` | arc color |
+| `bottomLabel` | string | `""` | small text under the ring |
+| `ringContent` | Component | *(required)* | drawn inside the ring; its root element must size itself relative to its own `parent.width`/`height` |
+| `cardContent` | Component | `null` | hover detail card body (`null` = no hover); include your own title row, the host draws no chrome inside the card |
+| `cardWidth` | int | `220` | detail card width |
+
+Your item owns its own data fetching (`Process`, `Timer`, `FileView`, …) —
+see `items/weather.qml` or `items/cpu.qml` for real examples. `items/Theme.qml`
+has shared colors (`Theme { id: theme }`, then `theme.textPrimary` etc.) if
+you want to match the built-in look.
+
 ## Data sources
 
-- `~/.local/state/omarchy/agents/usage/*.json` — from `omarchy.agents`
-- [wttr.in](https://wttr.in) — location bootstrap
-- [Open-Meteo](https://open-meteo.com) — weather/forecast
-- `/proc/stat`, `/proc/meminfo`, `/proc/loadavg`, `/proc/net/dev`,
-  `/sys/.../cpufreq` — CPU/memory/network
+- `~/.local/state/omarchy/agents/usage/*.json` — from `omarchy.agents` (`items/agent.qml`)
+- [wttr.in](https://wttr.in) — location bootstrap (`items/weather.qml`)
+- [Open-Meteo](https://open-meteo.com) — weather/forecast (`items/weather.qml`)
+- `/proc/stat`, `/proc/meminfo`, `/proc/loadavg` — `bin/notch-resource-stats`, polled independently by `items/cpu.qml` and `items/memory.qml`
+- `/proc/net/dev` — `bin/notch-network-stats`, polled independently by `items/download.qml` and `items/upload.qml`
 
 ## Requirements
 
