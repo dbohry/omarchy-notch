@@ -55,12 +55,16 @@ Item {
   }
 
   readonly property Component ringContent: Component {
-    Image {
-      anchors.centerIn: parent
-      width: parent.width * 0.42
-      height: width
-      source: "file://" + root.icon
-      fillMode: Image.PreserveAspectFit
+    Item {
+      Image {
+        anchors.centerIn: parent
+        width: parent.width * 0.42
+        height: width
+        sourceSize.width: width
+        sourceSize.height: height
+        source: "file://" + root.icon
+        fillMode: Image.PreserveAspectFit
+      }
     }
   }
 
