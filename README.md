@@ -31,10 +31,10 @@ mkdir -p ~/.config/notch
 cp ~/.config/omarchy/plugins/notch/settings.default.toml ~/.config/notch/settings.toml
 ```
 
-Edit `~/.config/notch/settings.toml`. Live reload, no restart needed. Living
-outside the plugin dir means a `git pull` / reinstall never touches or
-conflicts with your settings. If the file is absent, the bundled defaults
-apply.
+Edit `~/.config/notch/settings.toml`, then run `omarchy restart shell` to
+apply the change. Living outside the plugin dir means a `git pull` /
+reinstall never touches or conflicts with your settings. If the file is
+absent, the bundled defaults apply.
 
 ```toml
 size = "small"   # small | medium | large
