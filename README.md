@@ -47,16 +47,12 @@ upload = false
 
 ## Writing an item
 
-Every ring type — weather, cpu, memory, download, upload, agent usage — is a
-self-contained file under `items/`. `Panel.qml` itself has no idea what a
-"weather" or "cpu" is; it just discovers `items/*.qml` at startup and loads
-one instance per id listed in `settings.toml [items]`, falling back to
-`items/agent.qml` for any id that doesn't match a file (that's how arbitrary
-agent ids work with zero registration).
-
-Item ids are lowercase. Files in `items/` starting with anything else
-(`Theme.qml`, `ProcBreakdown.qml`, `_template.qml`, ...) are shared building
-blocks, not items, and are skipped by discovery.
+Each ring type is a self-contained file under `items/`. `Panel.qml` discovers
+`items/*.qml` at startup and loads one instance per id listed in
+`settings.toml [items]`, falling back to `items/agent.qml` for any id that
+doesn't match a file — that's how arbitrary agent ids work with zero
+registration. Lowercase filenames are items; capitalized ones (`Theme.qml`,
+`ProcBreakdown.qml`, ...) are shared building blocks, skipped by discovery.
 
 To add your own:
 
@@ -64,56 +60,16 @@ To add your own:
 2. Add `<your-id> = true` under `[items]` in `settings.toml`.
 3. Reload the plugin. No edits to `Panel.qml` needed.
 
-The host reads these properties off your item (all optional except
-`ringContent`, defaults shown):
+`items/_template.qml` documents the full contract: the properties the host
+reads off your item (`available`, `percent`, `ringContent`, `cardContent`,
+...) and what `host` hands you (`host.pluginDir`, `host.sysStats`, ...). Your
+item owns its own data fetching (`Process`, `Timer`, `FileView`, …) — see
+`items/weather.qml` for a real example.
 
-| Property | Type | Default | Meaning |
-|---|---|---|---|
-| `itemId` | string | set by host | matches your `[items]` key |
-| `host` | var | set by host | the `Panel.qml` root — see below |
-| `available` | bool | `true` | `false` hides the ring entirely |
-| `percent` | real | `0` | 0..1, drives the progress arc |
-| `known` | bool | `false` | arc stays flat until true |
-| `showArc` | bool | `false` | opt into the host-drawn progress arc |
-| `ringColor` | color | `"#8a8a8a"` | arc color |
-| `bottomLabel` | string | `""` | small text under the ring |
-| `ringContent` | Component | *(required)* | drawn inside the ring; its root element must size itself relative to its own `parent.width`/`height` |
-| `cardContent` | Component | `null` | hover detail card body (`null` = no hover); include your own title row, the host draws no chrome inside the card |
-| `cardWidth` | int | `220` | detail card width |
-
-Your item owns its own data fetching (`Process`, `Timer`, `FileView`, …) —
-see `items/weather.qml` for a real example.
-
-`host` is the `Panel.qml` root, for the few things worth sharing:
-
-| | |
-|---|---|
-| `host.pluginDir` | this plugin's directory, for `bin/` helpers |
-| `host.usageDir` | `omarchy.agents` usage records |
-| `host.expanded` | true while the pill is open |
-| `host.sysStats` | shared CPU/memory poll (`items/SysStats.qml`) |
-| `host.netStats` | shared network poll (`items/NetStats.qml`) |
-
-The two pollers run one process per tick no matter how many items read them,
-tick slowly while the pill is closed, and stay idle until something
-subscribes — so an item that reads one must say so:
-
-```qml
-Component.onCompleted: host.sysStats.users++
-Component.onDestruction: host.sysStats.users--
-```
-
-`items/` also has ready-made pieces you can drop into a card (no import
-needed, they are same-directory types):
-
-| | |
-|---|---|
-| `Theme` | colors + `severityColor()` / `rankColor()` (`Theme { id: theme }`) |
-| `CardHeader` | card title plus the big number / caption row |
-| `LabeledBar` | labelled progress bar with optional detail and footer |
-| `ProcBreakdown` | stacked "top 3 processes + everything else" bar and legend |
-| `Retry` | a give-up-after-N-tries timer for flaky fetches |
-| `NetRate` | the whole download/upload ring, minus direction and color |
+`items/` also has drop-in pieces for cards (same-directory types, no import
+needed): `Theme` for colors, `CardHeader` for the title/big-number row,
+`LabeledBar` for a labelled progress bar, `ProcBreakdown` for a stacked
+top-process bar, `Retry` for a give-up-after-N-tries timer.
 
 ## Data sources
 
