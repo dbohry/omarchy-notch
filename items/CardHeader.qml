@@ -1,7 +1,6 @@
 import QtQuick
 
-// Card title plus the big "42% / Memory in use" hero row, with optional
-// faint right-aligned notes (clock speed, load averages, ...).
+// Card title plus the big "42% / Memory in use" hero row.
 Column {
   id: root
   property string title: ""

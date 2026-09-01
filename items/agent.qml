@@ -1,8 +1,7 @@
 import QtQuick
 import Quickshell.Io
 
-// Fallback for any configured id with no matching items/*.qml file -- one
-// instance per agent id, each watching its own usage record.
+// Fallback for any configured id with no matching items/*.qml file.
 Item {
   id: root
   visible: false
@@ -11,8 +10,7 @@ Item {
   property var host: null
 
   readonly property string assetsDir: "/usr/share/omarchy/shell/plugins/agents/assets"
-  // Everything not listed here still works: the icon falls back to
-  // <id>.svg, the color to grey, the name to whatever the record says.
+  // Unlisted ids still work: icon falls back to <id>.svg, color to grey.
   readonly property var known_agents: ({
     claude:    { icon: "claude.svg",    color: "#e8622c", name: "Claude" },
     codex:     { icon: "codex.svg",     color: "#3ecf6e", name: "Codex" },
@@ -68,7 +66,6 @@ Item {
 
   readonly property int cardWidth: 220
 
-  // No card until there's something to put in it.
   readonly property Component cardContent: root.limits.length > 0 ? root.usageCard : null
 
   readonly property Component usageCard: Component {

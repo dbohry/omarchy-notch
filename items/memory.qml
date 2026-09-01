@@ -1,9 +1,8 @@
 import QtQuick
 import Quickshell.Io
 
-// Memory ring. Usage numbers come from the host's shared SysStats poll; the
-// only thing this file fetches itself is the DIMM clock speed, which is fixed
-// for the boot and so read once, not on the poll.
+// Memory ring. Usage comes from the host's shared SysStats poll; DIMM speed
+// is fixed for the boot, so it's read once here instead.
 Item {
   id: root
   visible: false
@@ -32,9 +31,7 @@ Item {
     ? (root.stats.swapTotalKb - root.stats.swapFreeKb) / root.stats.swapTotalKb
     : 0
 
-  // inxi is an optional package -- notch-resource-stats deliberately avoids
-  // extra deps, so a missing binary just leaves this label blank.
-  property string speedLabel: ""
+  property string speedLabel: ""  // inxi is optional; missing binary = blank
 
   Process {
     running: true

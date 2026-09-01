@@ -1,8 +1,7 @@
 import QtQuick
 import Quickshell.Io
 
-// Single shared poll of bin/notch-network-stats, reachable from items as
-// `host.netStats`. Same subscribe/pace contract as items/SysStats.qml.
+// Single shared poll of bin/notch-network-stats, reachable as host.netStats.
 Item {
   id: root
   visible: false
@@ -30,7 +29,6 @@ Item {
     }
   }
 
-  // Don't make the first hover wait out a slow tick.
   onFastChanged: if (root.fast && root.users > 0 && !statsProcess.running) statsProcess.running = true
 
   Timer {

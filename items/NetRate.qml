@@ -1,8 +1,6 @@
 import QtQuick
 
 // Shared body of the download/upload rings: same shape, different direction.
-// Both read the host's single NetStats poll, so the sampling script runs once
-// per tick no matter how many of them are enabled.
 Item {
   id: root
   visible: false
@@ -10,8 +8,7 @@ Item {
   property string itemId: ""
   property var host: null
 
-  // false = received (download), true = transmitted (upload).
-  property bool upload: false
+  property bool upload: false  // false = download, true = upload
   property string glyph: "↓"
   property color ringColor: "#8a8a8a"
 

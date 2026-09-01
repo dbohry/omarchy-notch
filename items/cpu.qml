@@ -1,8 +1,6 @@
 import QtQuick
 
-// CPU ring. All numbers come from the host's shared SysStats poll, so this
-// file spawns no process of its own -- see items/_template.qml for the
-// host/itemId contract.
+// CPU ring. Numbers come from the host's shared SysStats poll.
 Item {
   id: root
   visible: false

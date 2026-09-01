@@ -1,21 +1,14 @@
 import QtQuick
 import Quickshell.Io
 
-// Single shared poll of bin/notch-resource-stats. The host owns one instance
-// and hands it to items as `host.sysStats`; items/cpu.qml and
-// items/memory.qml both read it, so the script's /proc sweep runs once per
-// tick instead of once per item.
+// Single shared poll of bin/notch-resource-stats, reachable as host.sysStats.
 Item {
   id: root
   visible: false
 
   property string pluginDir: ""
-  // Fast while the pill is open, slow while collapsed -- the rings aren't on
-  // screen then, the slow tick only keeps values warm for the next hover.
-  property bool fast: false
-  // Bumped by each item that reads this (see items/_template.qml). Nothing
-  // subscribed means nothing polled, so a disabled item costs nothing.
-  property int users: 0
+  property bool fast: false  // fast while open, slow while collapsed
+  property int users: 0  // bumped by each subscribed item; 0 = no polling
 
   property bool ready: false
 
@@ -24,9 +17,7 @@ Item {
   property real load1: 0
   property real load5: 0
   property real load15: 0
-  // Top 3 processes as [{name, percent}], plus cpuOther for the rest;
-  // normalized so they sum close to cpuPercent (see notch-resource-stats).
-  property var cpuProcesses: []
+  property var cpuProcesses: []  // [{name, percent}], sums close to cpuPercent
   property real cpuOther: 0
 
   property real memPercent: 0
@@ -57,8 +48,7 @@ Item {
         root.swapTotalKb = parseFloat(head[8]) || 0
         root.swapFreeKb = parseFloat(head[9]) || 0
 
-        // Two "<name>\t<pct>" blocks split by a ---MEM--- line, each ending
-        // in one __OTHER__ row for everything outside the top 3.
+        // Two "<name>\t<pct>" blocks split by a ---MEM--- line.
         var cpuTop = [], memTop = [], cpuOther = 0, memOther = 0, inMem = false
         for (var i = 1; i < lines.length; i++) {
           var line = lines[i]
@@ -82,7 +72,6 @@ Item {
     }
   }
 
-  // Don't make the first hover wait out a slow tick.
   onFastChanged: if (root.fast && root.users > 0 && !statsProcess.running) statsProcess.running = true
 
   Timer {

@@ -1,6 +1,5 @@
 import QtQuick
 
-// Total receive rate across all non-loopback interfaces.
 NetRate {
   upload: false
   glyph: "↓"

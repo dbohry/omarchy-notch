@@ -1,7 +1,7 @@
 import QtQuick
 
-// A Timer that fires at most `max` times before giving up, for flaky network
-// fetches. Call schedule() on failure and reset() on success.
+// Fires at most `max` times before giving up. Call schedule() on failure,
+// reset() on success.
 Timer {
   id: root
   property int attempts: 0

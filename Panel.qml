@@ -5,10 +5,8 @@ import Quickshell.Wayland
 import Quickshell.Hyprland
 import "items"
 
-// Hover-triggered edge notch: thin idle strip at the top-right corner,
-// expands into a column of rings on hover. Generic host only -- every
-// ring type lives in its own items/*.qml file, see items/_template.qml
-// for the contract.
+// Hover-triggered edge notch. Ring types live in items/*.qml, see
+// items/_template.qml for the contract.
 Item {
   id: root
   visible: false
@@ -22,9 +20,7 @@ Item {
 
   Theme { id: theme }
 
-  // Shared pollers, handed to items as host.sysStats / host.netStats. Each
-  // stays idle until an item subscribes, and only ticks fast while the pill
-  // is open -- nothing is on screen when it's closed.
+  // Handed to items as host.sysStats / host.netStats.
   readonly property alias sysStats: sysStatsPoller
   readonly property alias netStats: netStatsPoller
 
@@ -39,15 +35,10 @@ Item {
     fast: root.expanded
   }
 
-  // Hyprland's fullscreen flag misses borderless-fullscreen windows (a
-  // game/video sized to the monitor but not a real xdg-shell fullscreen
-  // request), so this also checks geometry. Matters beyond the popup:
-  // any visible layer-shell surface here blocks direct-scanout for
-  // whatever's fullscreen under it, capping its framerate.
+  // Hyprland's fullscreen flag misses borderless-fullscreen windows, so this
+  // also checks geometry against a tolerance (absorbs gaps_out/border_size).
   readonly property var activeToplevel: Hyprland.activeToplevel
   readonly property var activeMonitor: activeToplevel ? activeToplevel.monitor : null
-  // Percentage tolerance, not fixed pixels: absorbs gaps_out/border_size
-  // insetting a maximized window from the true monitor edge.
   readonly property bool borderlessFullscreen: {
     if (!activeToplevel || !activeMonitor) return false
     var ipc = activeToplevel.lastIpcObject
@@ -63,11 +54,8 @@ Item {
   readonly property bool fullscreenActive: trueFullscreen || borderlessFullscreen
   onFullscreenActiveChanged: if (fullscreenActive) root.expanded = false
 
-  // Quickshell doesn't refresh cached toplevel state on every Hyprland
-  // event -- going fullscreen without a focus change left it stale. Only
-  // the events that can change window geometry or fullscreen state need a
-  // refresh; the rest (workspace ticks, mouse crossings) would just be two
-  // wasted IPC round-trips.
+  // Quickshell doesn't refresh cached toplevel state on its own; only
+  // refresh on events that can change geometry/fullscreen state.
   readonly property var geometryEvents: ["fullscreen", "activewindow", "activewindowv2",
     "openwindow", "closewindow", "movewindow", "movewindowv2", "resizewindow",
     "changefloatingmode", "workspace", "workspacev2", "focusedmon"]
@@ -81,8 +69,6 @@ Item {
     }
   }
 
-  // Only the open pill scales with size; the collapsed strip below is a
-  // fixed edge trigger regardless.
   readonly property var sizePresets: ({
     small:  { ringSize: 38, ringStroke: 3, rowGap: 10, padTop: 10, padBottom: 9,  percentFont: 9 },
     medium: { ringSize: 50, ringStroke: 4, rowGap: 14, padTop: 14, padBottom: 12, percentFont: 11 },
@@ -94,13 +80,9 @@ Item {
   readonly property int collapsedW: 8
   readonly property int collapsedH: 70
   readonly property int expandedW: size.ringSize + 26
-  // Clears not just the bar but the first ring's hover card above it.
-  readonly property int topMargin: 90
-  // 0, not a small inset -- a nonzero value reads as nesting against a
-  // maximized window's border instead of the monitor's actual edge.
-  readonly property int rightMargin: 0
+  readonly property int topMargin: 90  // clears the first ring's hover card too
+  readonly property int rightMargin: 0  // nonzero reads as nested, not flush
 
-  // Only used when settings.toml is missing or has no [items] section.
   readonly property var defaultItems: ["claude", "weather", "cpu", "memory"]
   property var configuredItems: defaultItems
 
@@ -114,7 +96,6 @@ Item {
     onLoadFailed: root.configuredItems = root.defaultItems
   }
 
-  // Same TOML subset shell.toml/colors.toml use elsewhere in Omarchy.
   // Encounter order of `true` entries under [items] becomes render order.
   function applySettings(content) {
     var items = []
@@ -135,8 +116,7 @@ Item {
         var boolKv = line.match(/^([A-Za-z0-9_-]+)\s*=\s*(true|false)\s*(#.*)?$/)
         if (boolKv && boolKv[2] === "true") items.push(boolKv[1])
       } else if (section === "") {
-        // Must appear before any [section] -- TOML sections are sticky
-        // to end of file, so "size" after [items] would silently fail.
+        // size= must appear before any [section] -- TOML sections are sticky.
         var sizeKv = line.match(/^size\s*=\s*["']?([A-Za-z]+)["']?\s*(#.*)?$/)
         if (sizeKv) sizeValue = sizeKv[1]
       }
@@ -145,8 +125,7 @@ Item {
     root.sizeKey = root.sizePresets.hasOwnProperty(sizeValue) ? sizeValue : "medium"
   }
 
-  // id -> absolute file:// url. Unmatched ids fall back to items/agent.qml,
-  // which is what makes arbitrary agent ids work with zero registration.
+  // id -> absolute file:// url. Unmatched ids fall back to items/agent.qml.
   property var itemTypePaths: ({})
   property bool itemTypesReady: false
 
@@ -161,8 +140,7 @@ Item {
         for (var i = 0; i < lines.length; i++) {
           var path = lines[i].trim()
           var name = path.slice(path.lastIndexOf("/") + 1, -4)
-          // Item ids are lowercase; anything else in items/ is a shared
-          // helper type (Theme, SysStats, ...) or the _template.
+          // Lowercase = item; capitalized = shared helper type (Theme, ...).
           if (!path || !/^[a-z]/.test(name)) continue
           map[name] = "file://" + path
         }
@@ -178,8 +156,6 @@ Item {
 
   PanelWindow {
     id: panel
-    // Whole surface withdrawn during fullscreen, not just the pill hidden
-    // -- see fullscreenActive above for why.
     visible: !root.fullscreenActive
     anchors { top: true; right: true; bottom: true; left: true }
     color: "transparent"
@@ -188,7 +164,6 @@ Item {
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
     exclusionMode: ExclusionMode.Ignore
 
-    // Only the pill accepts pointer input; the rest passes clicks through.
     mask: Region {
       item: pill
     }
@@ -202,7 +177,7 @@ Item {
       anchors.rightMargin: root.rightMargin
       width: root.expanded ? root.expandedW : root.collapsedW
       height: root.expanded ? (itemColumn.implicitHeight + root.size.padTop + root.size.padBottom) : root.collapsedH
-      radius: width / 2  // right side stays flush with the edge, see below
+      radius: width / 2  // right side stays flush with the screen edge
       topRightRadius: 0
       bottomRightRadius: 0
 
@@ -225,8 +200,7 @@ Item {
         spacing: root.size.rowGap
 
         Repeater {
-          // Held empty until item discovery finishes so delegates never
-          // try to load a source before itemSourceFor() has real data.
+          // Empty until discovery finishes, so no delegate loads a bad source.
           model: root.itemTypesReady ? root.configuredItems : []
 
           Column {
@@ -237,9 +211,7 @@ Item {
 
             Loader {
               id: itemLoader
-              // Excluded from Column layout (0-size, invisible) -- this
-              // only holds the data-provider object, nothing to show.
-              visible: false
+              visible: false  // data-provider only, nothing to show
               Component.onCompleted: setSource(root.itemSourceFor(itemDelegate.modelData), {
                 itemId: itemDelegate.modelData,
                 host: root
@@ -269,16 +241,12 @@ Item {
                 sourceComponent: itemObj ? itemObj.ringContent : null
               }
 
-              // Separate from the pill-level HoverHandler -- this one
-              // only tracks this ring, for its own detail card.
               HoverHandler {
                 id: ringHover
                 enabled: !!itemObj && !!itemObj.cardContent
               }
 
-              // Positioned left of the ring; not clipped to ringBox's
-              // bounds, and not part of the input mask (purely
-              // informational, no controls).
+              // Not part of the input mask -- informational only.
               Rectangle {
                 id: detailCard
                 visible: ringHover.hovered && !!itemObj && !!itemObj.cardContent
@@ -298,10 +266,7 @@ Item {
                   sourceComponent: itemObj ? itemObj.cardContent : null
                 }
 
-                // Rotated square centered on the card's edge: half
-                // hidden under the card, half pokes out as a pointer.
-                // Must stay a child of detailCard so "parent" resolves
-                // to the card.
+                // Must stay a child of detailCard so "parent" resolves right.
                 Rectangle {
                   width: 16
                   height: 16

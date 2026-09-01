@@ -1,25 +1,19 @@
 import QtQuick
 
-// Stacked "top 3 processes + everything else" bar with its legend, shared by
-// the cpu and memory cards. Drop it into a card Column and hand it a process
-// list from host.sysStats.
+// Stacked "top 3 processes + everything else" bar with its legend.
 Column {
   id: root
 
-  // Ring/accent color; each row gets a progressively darker shade of it.
   property color accent: "#8a8a8a"
-  // [{name, percent}], already sorted, at most 3 (see notch-resource-stats).
-  property var processes: []
+  property var processes: []  // [{name, percent}], sorted, at most 3
   property real otherPercent: 0
-  // 0..1 overall utilization -- how much of the track the bar fills.
-  property real fillFraction: 0
+  property real fillFraction: 0  // 0..1, how much of the track fills
 
   spacing: 10
 
   Theme { id: theme }
 
-  // One row list drives both the bar segments and the legend, so the two can
-  // never disagree. `name` is the kernel's own truncated comm (15 chars max).
+  // Drives both bar segments and legend, so the two can't disagree.
   readonly property var rows: {
     var out = []
     for (var i = 0; i < root.processes.length; i++) {

@@ -2,10 +2,8 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 
-// wttr.in bootstraps lat/lon from the location the built-in weather bar
-// widget already writes (no separate picker here); Open-Meteo supplies the
-// live reading + 4-day forecast. Missing/name-only location means IP
-// auto-detect via wttr.in.
+// wttr.in bootstraps lat/lon from the weather bar widget's saved location;
+// Open-Meteo supplies the live reading + forecast.
 Item {
   id: root
   visible: false
@@ -22,11 +20,9 @@ Item {
   property real humidity: NaN
   property real windKmph: NaN
   property string windDir: ""
-  // daily.*[0] in the same Open-Meteo response as the forecast (index 0).
   property real todayMaxC: NaN
   property real todayMinC: NaN
-  // Next 3 days: [{dayLabel, emoji, maxC, minC}, ...]
-  property var forecast: []
+  property var forecast: []  // next 3 days: [{dayLabel, emoji, maxC, minC}]
   property bool ready: false
   property string locationQuery: ""
   property real lat: NaN
@@ -39,8 +35,7 @@ Item {
   readonly property color ringColor: "#5db8e8"
   readonly property string bottomLabel: root.known ? (Math.round(root.tempC) + "°") : "--"
 
-  // Open-Meteo WMO weather codes. `night` is the after-dark variant, only
-  // meaningful for the live reading -- forecast days have no day/night state.
+  // Open-Meteo WMO weather codes; `night` only applies to the live reading.
   readonly property var conditions: [
     { codes: [0],                        emoji: "☀",  night: "🌙", text: "Clear" },
     { codes: [1, 2],                     emoji: "⛅", night: "🌙", text: "Partly cloudy" },
@@ -70,8 +65,7 @@ Item {
     return dirs[Math.round(deg / 22.5) % 16]
   }
 
-  // daily.* are parallel arrays; index 0 is today (shown in the hero row),
-  // so this starts at 1 and takes the next 3.
+  // index 0 is today (shown in the hero row), so this starts at 1.
   function parseForecast(daily) {
     if (!daily || !Array.isArray(daily.time)) return []
     var out = []
@@ -109,9 +103,6 @@ Item {
     }
   }
 
-  // wttr.in / open-meteo can be slow or flaky, especially right after waking
-  // with the network still down. Each Retry gives up after 3 attempts and
-  // leaves it to the 15-minute refresh timer.
   Retry {
     id: geoRetry
     onTriggered: if (!geoProcess.running) geoProcess.running = true
@@ -201,15 +192,12 @@ Item {
   }
 
   readonly property Component ringContent: Component {
-    // font.family pinned: fontconfig's default match for some of these
-    // codepoints (clear-sky "☀") resolves to a plain UI font instead
-    // of the emoji font.
     Text {
       anchors.fill: parent
       horizontalAlignment: Text.AlignHCenter
       verticalAlignment: Text.AlignVCenter
       text: root.known ? root.weatherEmoji(root.code, root.isDay) : "⛅"
-      font.family: "Noto Color Emoji"
+      font.family: "Noto Color Emoji"  // some codepoints else fall to a UI font
       font.pixelSize: parent.height * 0.42
     }
   }

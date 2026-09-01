@@ -1,12 +1,10 @@
 import QtQuick
 
-// "Used ............ 5.1 / 16.0 GB" over a severity-colored progress bar,
-// with an optional line underneath. Used by the memory and agent cards.
+// Labeled progress bar with an optional footer line.
 Column {
   id: root
   property string label: ""
-  // Right-aligned on the label row (a total, a reset time, ...).
-  property string detail: ""
+  property string detail: ""  // right-aligned on the label row
   property real fraction: 0
   property string footer: ""
 
