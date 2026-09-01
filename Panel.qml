@@ -5,17 +5,10 @@ import Quickshell.Io
 import Quickshell.Wayland
 import Quickshell.Hyprland
 
-// Hover-triggered edge notch: a thin idle strip at the top-right corner
-// that expands into a column of rings on hover. Driven by settings.toml
-// (a hand-rolled TOML subset, see applySettings below) -- see README.md
-// for the full config format.
-//
-// This file is a generic host: pill expand/collapse, fullscreen
-// detection, settings parsing, and ring/card *chrome*. Every ring TYPE
-// (weather, cpu, memory, download, upload, agent usage, or anything a
-// third party adds) lives in its own self-contained items/*.qml file --
-// see items/_template.qml for the contract. Adding a new item never
-// requires editing this file.
+// Hover-triggered edge notch: thin idle strip at the top-right corner,
+// expands into a column of rings on hover. Generic host only -- every
+// ring type lives in its own items/*.qml file, see items/_template.qml
+// for the contract.
 Item {
   id: root
   visible: false
@@ -84,8 +77,6 @@ Item {
   // 0, not a small inset -- a nonzero value reads as nesting against a
   // maximized window's border instead of the monitor's actual edge.
   readonly property int rightMargin: 0
-
-  // ------------------------------------------------------------ settings
 
   function defaultItems() {
     return root.agentIds.concat(["weather", "cpu", "memory", "download", "upload"])
@@ -166,11 +157,7 @@ Item {
     onTriggered: listProcess.running = true
   }
 
-  // -------------------------------------------------------- item discovery
-
-  // id -> absolute file:// url. Any items/<id>.qml file becomes the
-  // component for that exact id; any configured id with no matching file
-  // falls back to items/agent.qml (parameterized by itemId).
+  // id -> absolute file:// url. Unmatched ids fall back to items/agent.qml.
   property var itemTypePaths: ({})
   property bool itemTypesReady: false
 
@@ -204,8 +191,6 @@ Item {
     if (root.itemTypePaths.hasOwnProperty("agent")) return root.itemTypePaths["agent"]
     return ""
   }
-
-  // ------------------------------------------------------------- panel
 
   PanelWindow {
     id: panel

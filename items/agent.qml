@@ -2,10 +2,8 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 
-// Generic fallback for any configured id that isn't a more specific
-// items/*.qml file -- one instance per agent id (claude, codex,
-// fireworks, or any future id omarchy.agents writes a usage record for).
-// Watches its own usage record; no host-level registry involved.
+// Fallback for any configured id with no matching items/*.qml file --
+// one instance per agent id, each watching its own usage record.
 Item {
   id: root
   visible: false
