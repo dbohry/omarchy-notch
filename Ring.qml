@@ -9,6 +9,8 @@ Shape {
   property real fraction: 1  // 0..1 of the full circle
 
   anchors.fill: parent
+  preferredRendererType: Shape.CurveRenderer
+  antialiasing: true
 
   ShapePath {
     strokeWidth: root.thickness
