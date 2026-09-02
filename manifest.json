@@ -4,7 +4,7 @@
   "name": "Notch",
   "version": "1.0.0",
   "author": "dbohry",
-  "description": "Hover-triggered edge notch showing AI agent usage rings",
+  "description": "Hover-triggered notch panel with rings for AI agent usage, CPU, memory, weather, and network",
   "kinds": ["panel"],
   "keepLoaded": true,
   "entryPoints": { "panel": "Panel.qml" }
