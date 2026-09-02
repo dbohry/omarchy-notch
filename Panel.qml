@@ -299,8 +299,8 @@ Item {
       topRightRadius: 0
       bottomRightRadius: 0
 
-      Behavior on width { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
-      Behavior on height { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+      Behavior on width { NumberAnimation { duration: 160; easing.type: root.expanded ? Easing.OutCubic : Easing.InCubic } }
+      Behavior on height { NumberAnimation { duration: 160; easing.type: root.expanded ? Easing.OutCubic : Easing.InCubic } }
 
       HoverHandler {
         id: pillHover
