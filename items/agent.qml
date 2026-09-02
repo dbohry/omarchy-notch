@@ -20,6 +20,9 @@ Item {
 
   property var record: null
 
+  Component.onCompleted: if (root.host && root.host.agentUsage) root.host.agentUsage.users++
+  Component.onDestruction: if (root.host && root.host.agentUsage) root.host.agentUsage.users--
+
   readonly property bool available: root.record !== null
   readonly property var limits: (root.record && Array.isArray(root.record.limits)) ? root.record.limits : []
   readonly property string displayName: root.meta.name || (root.record && root.record.name) || root.itemId

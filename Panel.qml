@@ -23,9 +23,10 @@ Item {
 
   Theme { id: theme }
 
-  // Handed to items as host.sysStats / host.netStats.
+  // Handed to items as host.sysStats / host.netStats / host.agentUsage.
   readonly property alias sysStats: sysStatsPoller
   readonly property alias netStats: netStatsPoller
+  readonly property alias agentUsage: agentUsagePoller
 
   SysStats {
     id: sysStatsPoller
@@ -36,6 +37,9 @@ Item {
     id: netStatsPoller
     pluginDir: root.pluginDir
     fast: root.expanded
+  }
+  AgentUsage {
+    id: agentUsagePoller
   }
 
   // Hyprland's fullscreen flag misses borderless-fullscreen windows, so this

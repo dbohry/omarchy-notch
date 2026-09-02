@@ -10,8 +10,9 @@ Item {
 
   // Set by the host: itemId matches the [items] key in settings. host is
   // the Panel.qml root -- host.pluginDir, host.usageDir, host.expanded,
-  // and the shared pollers host.sysStats / host.netStats (items/SysStats.qml,
-  // items/NetStats.qml), which only run while subscribed:
+  // and the shared pollers host.sysStats / host.netStats / host.agentUsage
+  // (items/SysStats.qml, items/NetStats.qml, items/AgentUsage.qml), which
+  // only run while subscribed:
   //   Component.onCompleted: host.sysStats.users++
   //   Component.onDestruction: host.sysStats.users--
   property string itemId: ""

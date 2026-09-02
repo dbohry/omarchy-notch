@@ -76,7 +76,7 @@ Item {
 
   Timer {
     running: root.users > 0
-    interval: root.fast ? 3000 : 30000
+    interval: root.fast ? 2000 : 30000
     repeat: true
     triggeredOnStart: true
     onTriggered: if (!statsProcess.running) statsProcess.running = true
