@@ -267,6 +267,29 @@ Item {
     return root.itemTypePaths[id] || root.itemTypePaths["agent"] || ""
   }
 
+  Timer {
+    id: panelRecreateTimer
+    interval: 300
+    onTriggered: {
+      panelLoader.active = false
+      Qt.callLater(function() { panelLoader.active = true })
+    }
+  }
+
+  Connections {
+    target: Quickshell
+    function onScreensChanged() { panelRecreateTimer.restart() }
+  }
+
+  Loader {
+    id: panelLoader
+    active: true
+    sourceComponent: panelComponent
+  }
+
+  Component {
+    id: panelComponent
+
   PanelWindow {
     id: panel
     visible: !root.fullscreenActive
@@ -420,5 +443,7 @@ Item {
         host: root
       }
     }
+  }
+
   }
 }
