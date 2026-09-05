@@ -28,6 +28,10 @@ Item {
   property real lat: NaN
   property real lon: NaN
 
+  // hard producer-side cap: curl aborts past this, and any stray
+  // over-budget stdout gets rejected before JSON.parse runs.
+  readonly property int responseByteCap: 65536
+
   readonly property bool available: true
   readonly property bool known: root.ready && !isNaN(root.tempC)
   readonly property real percent: 0
@@ -113,14 +117,36 @@ Item {
     onTriggered: if (!openMeteoProcess.running) openMeteoProcess.running = true
   }
 
+  // Structural checks applied before any field is read, so a schema-shaped
+  // but hostile payload (wrong types, huge nested arrays) can't reach the model.
+  function validGeoResponse(o) {
+    return !!o && Array.isArray(o.nearest_area) && o.nearest_area.length > 0
+      && typeof o.nearest_area[0] === "object"
+      && !isNaN(parseFloat(o.nearest_area[0].latitude))
+      && !isNaN(parseFloat(o.nearest_area[0].longitude))
+  }
+
+  function validOpenMeteoResponse(o) {
+    if (!o || typeof o.current !== "object" || typeof o.daily !== "object") return false
+    var d = o.daily
+    return Array.isArray(d.time) && Array.isArray(d.weather_code)
+      && Array.isArray(d.temperature_2m_max) && Array.isArray(d.temperature_2m_min)
+      && d.time.length > 0 && d.time.length <= 16
+  }
+
   Process {
     id: geoProcess
-    command: ["curl", "-fsS", "--max-time", "5", "https://wttr.in/" + encodeURIComponent(root.locationQuery) + "?format=j1"]
+    command: ["curl", "-fsS", "--max-time", "5", "--max-filesize", String(root.responseByteCap),
+      "https://wttr.in/" + encodeURIComponent(root.locationQuery) + "?format=j1"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
         try {
-          var area = JSON.parse(String(text || "")).nearest_area[0]
+          var raw = String(text || "")
+          if (raw.length > root.responseByteCap) throw new Error("geo response over cap")
+          var parsed = JSON.parse(raw)
+          if (!root.validGeoResponse(parsed)) throw new Error("geo response failed schema check")
+          var area = parsed.nearest_area[0]
           geoRetry.reset()
           root.fetchOpenMeteo(parseFloat(area.latitude), parseFloat(area.longitude))
         } catch (e) {
@@ -136,7 +162,10 @@ Item {
       waitForEnd: true
       onStreamFinished: {
         try {
-          var report = JSON.parse(String(text || ""))
+          var raw = String(text || "")
+          if (raw.length > root.responseByteCap) throw new Error("open-meteo response over cap")
+          var report = JSON.parse(raw)
+          if (!root.validOpenMeteoResponse(report)) throw new Error("open-meteo response failed schema check")
           var current = report.current
           root.tempC = parseFloat(current.temperature_2m)
           root.code = parseFloat(current.weather_code)
@@ -168,7 +197,7 @@ Item {
       + "&daily=weather_code,temperature_2m_max,temperature_2m_min"
       + "&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,wind_direction_10m,weather_code,is_day"
       + "&forecast_days=4&timezone=auto"
-    openMeteoProcess.command = ["curl", "-fsS", "--max-time", "5", url]
+    openMeteoProcess.command = ["curl", "-fsS", "--max-time", "5", "--max-filesize", String(root.responseByteCap), url]
     openMeteoProcess.running = true
   }
 
